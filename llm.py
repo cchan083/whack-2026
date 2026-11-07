@@ -58,10 +58,18 @@ def cluster_keywords(texts_by_cluster: dict[int, list[str]], top_n: int = 10) ->
     rarity = np.log(1 + avg_words_per_cluster / np.maximum(counts.sum(axis=0), 1))
     scores = tf * rarity
 
+    # Words found in most clusters ("climate" in a climate dataset) describe the
+    # whole field, not one cluster, so never use them in labels.
+    if len(ids) >= 5:
+        share_of_clusters = (counts > 0).mean(axis=0)
+        scores[:, share_of_clusters > 0.5] = 0
+
     result = {}
     for row, cluster_id in enumerate(ids):
         picked: list[str] = []
         for idx in scores[row].argsort()[::-1]:  # best score first
+            if scores[row, idx] <= 0:
+                break  # only filtered-out or absent words left
             term = vocab[idx]
             # Terms sharing a word with one already picked ("flood" vs "floods").
             overlap = [p for p in picked if _roots(term) & _roots(p)]

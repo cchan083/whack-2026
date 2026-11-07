@@ -22,7 +22,9 @@ DATABASE_URL = "postgresql+psycopg2://" + _rest
 
 # pool_pre_ping checks a connection is still alive before using it,
 # because Supabase closes connections that sit idle.
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+# executemany_mode sends many-row UPDATEs in a few round trips instead of one
+# per row, which is much faster over the network.
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, executemany_mode="values_plus_batch")
 
 EMBEDDING_DIMS = 384  # size of all-MiniLM-L6-v2 vectors
 
