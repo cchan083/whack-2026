@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# local archive of retired projects (not for GitHub)
+archive/
+.venv-app/
