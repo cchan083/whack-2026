@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { buildTopic, getCategories, getJob, getTopicMap, getTopics } from "./api.js";
-import { PALETTES, useColorScheme } from "./theme.js";
+import { COLOURS } from "./theme.js";
 import TopicSearch from "./components/TopicSearch.jsx";
 import MapView from "./components/MapView.jsx";
 import GapDetail from "./components/GapDetail.jsx";
@@ -10,7 +10,7 @@ import GapTable from "./components/GapTable.jsx";
 const fieldFromUrl = () => decodeURIComponent(window.location.hash.slice(1)) || null;
 
 export default function App() {
-  const colours = PALETTES[useColorScheme()];
+  const colours = COLOURS;
 
   const [topics, setTopics] = useState([]); // every topic in the database
   const [categories, setCategories] = useState([]);
