@@ -3,14 +3,17 @@
 Example:
     python -m pipeline.gaps --field "ml-climate"
 
-A gap is a pair of neighbouring clusters whose topics are similar, but with an
-empty stretch of map between them: few papers bridge the two topics.
+A gap is a pair of similar clusters with an empty stretch between them: few
+papers bridge the two topics. All geometry here uses the 384-number embeddings,
+not the 2D map: UMAP keeps nearby papers together, but distances between
+faraway clusters on the map don't mean much.
 
 Steps:
-1. Neighbours: link each cluster to the clusters around it (a Delaunay
-   triangulation of the cluster centres), dropping the longest links.
-2. Emptiness: walk along the line between the two clusters, find the spot with
-   the fewest papers nearby, and compare it with how crowded clusters usually are.
+1. Neighbours: link each cluster to its most similar clusters (cosine
+   similarity of their average embeddings).
+2. Emptiness: walk along the path between the two clusters' average embeddings,
+   find the spot with the fewest papers nearby, and compare it with how crowded
+   it is around a typical clustered paper.
    1.0 = no papers at all there, 0.0 = as crowded as inside a cluster.
 3. Relatedness: cosine similarity of the two clusters' average embeddings.
 4. Base score = relatedness x emptiness.
@@ -28,7 +31,6 @@ from itertools import combinations
 
 import numpy as np
 import pandas as pd
-from scipy.spatial import Delaunay, cKDTree
 from sqlalchemy import delete, update
 from sqlmodel import Session, select
 
@@ -36,8 +38,8 @@ import llm
 from db import Cluster, Gap, Paper, engine, init_db
 from pipeline import console_progress, validation
 
-RADIUS_FRACTION = 0.04  # "nearby" = within 4% of the map's width
-MAX_LINK_PERCENTILE = 75  # ignore the longest 25% of neighbour links
+NEIGHBOURS_PER_TOPIC = 5  # each topic is paired with its 5 most similar topics
+CROWDING_K = 10  # "nearby" = closer than a typical paper's 10th-nearest neighbour
 SAMPLES_ALONG_LINE = 21  # points checked between two cluster centres
 MAX_GAPS_PER_CLUSTER = 3  # keeps the gap list varied
 
@@ -46,6 +48,81 @@ def paper_link(title: str, arxiv_id: str) -> str:
     """Markdown link to the paper. Square brackets in titles would break the link."""
     safe = title.replace("[", "(").replace("]", ")")
     return f"[{safe}](https://arxiv.org/abs/{arxiv_id})"
+
+
+def _unit(m: np.ndarray) -> np.ndarray:
+    """Scale rows to length 1, so dot products are cosine similarities."""
+    return m / np.maximum(np.linalg.norm(m, axis=-1, keepdims=True), 1e-12)
+
+
+def candidate_pairs(
+    vectors: np.ndarray,
+    cluster_of: np.ndarray,
+    cluster_ids: list[int],
+    centres_2d: np.ndarray,
+    neighbours: int = NEIGHBOURS_PER_TOPIC,
+    crowding_k: int = CROWDING_K,
+) -> list[validation.CandidatePair]:
+    """Steps 1-4 for every linked pair of clusters (no database needed).
+
+    vectors: one embedding per paper; cluster_of: each paper's cluster id (-1 = noise);
+    cluster_ids: the clusters, in the same order as centres_2d (their 2D map centres,
+    used only to place the gap's star on the picture).
+    """
+    units = _unit(np.asarray(vectors, dtype=float))
+    clustered = cluster_of != -1
+    if len(cluster_ids) < 2 or clustered.sum() < 2:
+        return []
+
+    # "Nearby" radius, adapted to this map: the typical distance (1 - cosine)
+    # from a clustered paper to its k-th nearest neighbour.
+    k = min(crowding_k, len(units) - 1)
+    sims = units[clustered] @ units.T
+    kth_sim = -np.partition(-sims, k, axis=1)[:, k]  # index 0 is the paper itself
+    min_sim = 1 - float(np.median(1 - kth_sim))
+
+    def papers_near(points: np.ndarray) -> np.ndarray:
+        return ((points @ units.T) >= min_sim).sum(axis=1)
+
+    # How crowded it is around a typical clustered paper: our "full" level.
+    typical_crowding = max(float(np.median((sims >= min_sim).sum(axis=1))), 1.0)
+
+    # Average embedding direction of each cluster.
+    topic = _unit(np.array([units[cluster_of == cid].mean(axis=0) for cid in cluster_ids]))
+    similarity = topic @ topic.T
+
+    # Step 1: link each cluster to its most similar clusters.
+    if len(cluster_ids) <= 3:
+        links = set(combinations(range(len(cluster_ids)), 2))  # too few to choose: link them all
+    else:
+        links = set()
+        np.fill_diagonal(similarity, -np.inf)
+        for i in range(len(cluster_ids)):
+            for j in np.argsort(similarity[i])[::-1][:neighbours]:
+                links.add((min(i, int(j)), max(i, int(j))))
+
+    t = np.linspace(0, 1, SAMPLES_ALONG_LINE)
+    middle = t[(t >= 0.2) & (t <= 0.8)]  # skip the ends, which sit inside the clusters
+    candidates = []
+    for i, j in sorted(links):
+        # Step 2: emptiest spot on the path between the two average embeddings.
+        path = _unit((1 - middle)[:, None] * topic[i] + middle[:, None] * topic[j])
+        crowding = papers_near(path)
+        spot = int(np.argmin(crowding))
+        emptiness = 1 - min(crowding[spot] / typical_crowding, 1)
+
+        # Steps 3 and 4.
+        relatedness = float(topic[i] @ topic[j])
+        score = relatedness * emptiness
+        if score > 0:
+            # The star goes at the same fraction of the way along the 2D line
+            # between the two clusters, so it sits on the link drawn in the UI.
+            x, y = centres_2d[i] + middle[spot] * (centres_2d[j] - centres_2d[i])
+            candidates.append(validation.CandidatePair(
+                cluster_a=cluster_ids[i], cluster_b=cluster_ids[j], base_score=float(score),
+                relatedness=relatedness, emptiness=float(emptiness), x=float(x), y=float(y),
+            ))
+    return candidates
 
 
 def find_gaps(
@@ -82,58 +159,7 @@ def find_gaps(
     cluster_of = np.array([p.cluster_id if p.cluster_id is not None else -1 for p in papers])
     vectors = np.array([p.embedding for p in papers])
     centres = np.array([[c.centroid_x, c.centroid_y] for c in clusters])
-
-    # cKDTree makes "how many papers are within this radius?" fast.
-    tree = cKDTree(xy)
-    radius = RADIUS_FRACTION * np.ptp(xy, axis=0).max()
-
-    def papers_near(points: np.ndarray) -> np.ndarray:
-        return np.array([len(found) for found in tree.query_ball_point(points, radius)])
-
-    # How crowded it is around a typical clustered paper: our "full" level.
-    typical_crowding = np.median(papers_near(xy[cluster_of != -1]))
-
-    # Average embedding direction of each cluster, for relatedness.
-    topic_vector = {}
-    for c in clusters:
-        v = vectors[cluster_of == c.id].mean(axis=0)
-        topic_vector[c.id] = v / np.linalg.norm(v)
-
-    # Step 1: neighbour links between cluster centres (pairs of indices into `clusters`).
-    if len(clusters) <= 3:
-        links = set(combinations(range(len(clusters)), 2))  # too few for a triangulation: link them all
-    else:
-        links = set()
-        for triangle in Delaunay(centres).simplices:
-            for k in range(3):
-                i, j = sorted((int(triangle[k]), int(triangle[(k + 1) % 3])))
-                links.add((i, j))
-    length = {link: np.linalg.norm(centres[link[0]] - centres[link[1]]) for link in links}
-    max_length = np.percentile(list(length.values()), MAX_LINK_PERCENTILE)
-
-    candidates: list[validation.CandidatePair] = []
-    t = np.linspace(0, 1, SAMPLES_ALONG_LINE)
-    middle = (t >= 0.2) & (t <= 0.8)  # skip the ends, which sit inside the clusters
-    for i, j in links:
-        if length[(i, j)] > max_length:
-            continue
-        a, b = clusters[i], clusters[j]
-
-        # Step 2: emptiest spot on the line between the two centres.
-        line = centres[i] + t[:, None] * (centres[j] - centres[i])
-        crowding = papers_near(line).astype(float)
-        crowding[~middle] = np.inf
-        spot = int(np.argmin(crowding))
-        emptiness = 1 - min(crowding[spot] / typical_crowding, 1)
-
-        # Step 3 and 4.
-        relatedness = float(topic_vector[a.id] @ topic_vector[b.id])
-        score = relatedness * emptiness
-        if score > 0:
-            candidates.append(validation.CandidatePair(
-                cluster_a=a.id, cluster_b=b.id, base_score=float(score), relatedness=relatedness,
-                emptiness=float(emptiness), x=float(line[spot][0]), y=float(line[spot][1]),
-            ))
+    candidates = candidate_pairs(vectors, cluster_of, [c.id for c in clusters], centres)
 
     # Keywords for every cluster: used to classify topics and write proposals.
     texts_by_cluster = {
