@@ -340,10 +340,12 @@ fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 .legend-items li { display: flex; align-items: center; gap: var(--s-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .legend-items b { font-family: var(--font-mono); font-weight: 500; color: var(--text); }
 .lg-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.lg-a { background: var(--topic-a); }
-.lg-b { background: var(--topic-b); }
-.lg-other { background: var(--paper); width: 6px; height: 6px; margin: 0 1px; }
-.lg-noise { background: var(--paper-noise); width: 4px; height: 4px; margin: 0 2px; box-shadow: 0 0 0 1px var(--text-muted); }
+/* Swatches match lib/mapStyle.js sizes (9 / 5 / 4 px); the halo mirrors the map's glow. */
+.lg-a, .lg-b { width: 9px; height: 9px; }
+.lg-a { background: var(--topic-a); box-shadow: 0 0 0 3px rgba(57, 135, 229, 0.18); }
+.lg-b { background: var(--topic-b); box-shadow: 0 0 0 3px rgba(217, 89, 38, 0.18); }
+.lg-other { background: rgba(137, 135, 129, 0.75); width: 5px; height: 5px; margin: 0 2px; }
+.lg-noise { background: rgba(137, 135, 129, 0.5); width: 4px; height: 4px; margin: 0 2.5px; }
 .lg-star { color: var(--accent); flex: none; }
 
 .map-controls {
@@ -511,3 +513,20 @@ th[aria-sort="none"] .sort-glyph { opacity: 0.5; }
 
 .empty-title { font-size: var(--fs-lg); margin-bottom: var(--s-2); }
 .empty .btn { margin-top: var(--s-4); }
+
+/* --- Dot size control (map toolbar) ----------------------------------------- */
+
+.dot-size {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 2px; border-radius: var(--r-sm);
+  border: 1px solid var(--hairline-strong); background: var(--surface-page);
+}
+.dot-size-label { font-size: var(--fs-xs); color: var(--text-muted); padding: 0 4px 0 6px; }
+.dot-size-btn {
+  min-width: 24px; height: 22px; padding: 0 6px; border: 0; border-radius: 4px;
+  background: transparent; color: var(--text-2);
+  font: 500 var(--fs-xs) / 1 var(--font-mono); cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.dot-size-btn:hover { color: var(--text); }
+.dot-size-btn[aria-checked="true"] { background: var(--accent); color: var(--text-on-accent); }

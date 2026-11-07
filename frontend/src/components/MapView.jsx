@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Plotly from "plotly.js-dist-min";
 import { COLOURS, FONT_MONO, FONT_UI, shortName } from "../theme.js";
-import { boundsOf, flyTo, zoomBy } from "../lib/mapNav.js";
+import { boundsOf, currentRanges, flyTo, zoomBy } from "../lib/mapNav.js";
+import { DOT_SCALES, MAP_STYLE, dotSizes, zoomGrowth } from "../lib/mapStyle.js";
 import { Icon, IconButton, StarGlyph } from "./ui.jsx";
 
 // Traces are always in this order, so updates can target them by index.
-const T = { NOISE: 0, OTHERS: 1, A: 2, B: 3, LINK: 4, STARS: 5, RING: 6, SELECTED: 7, PAPER: 8 };
-const DIM = 0.22; // opacity of papers outside the selected pair
+const T = {
+  NOISE: 0, OTHERS: 1, HALO_A: 2, HALO_B: 3, A: 4, B: 5,
+  LINK: 6, STARS: 7, RING: 8, SELECTED: 9, PAPER: 10,
+};
+// Paper traces whose marker size follows the dot-size setting and zoom.
+const SIZED = [T.NOISE, T.OTHERS, T.HALO_A, T.HALO_B, T.A, T.B];
+const sizesFor = (s) => [s.noise, s.others, s.halo, s.halo, s.pair, s.pair];
 
 /** Truncate to ~80 characters, then wrap into lines for the hover box. */
 function hoverTitle(text, max = 80, width = 46) {
@@ -29,14 +35,14 @@ const xyc = (papers) => ({
 const PAPER_HOVER =
   "<b>%{customdata[0]}</b><br><span style='color:#a09e98'>%{customdata[1]} · %{customdata[2]}</span><extra></extra>";
 
-function paperTrace(points, { size, color, opacity, uid }) {
+function paperTrace(points, { size, color, opacity, uid, line, halo = false }) {
   return {
     type: "scattergl", // WebGL: fast with thousands of points
     mode: "markers",
     uid,
     ...xyc(points),
-    marker: { size, color, opacity },
-    hovertemplate: PAPER_HOVER,
+    marker: { size, color, opacity, ...(line ? { line } : {}) },
+    ...(halo ? { hoverinfo: "skip" } : { hovertemplate: PAPER_HOVER }),
   };
 }
 
@@ -142,13 +148,16 @@ function labelAnnotations(gd, prep, pair, showAll) {
   return out;
 }
 
-function buildTraces(prep, gaps, selected, pair, showNoise) {
+function buildTraces(prep, gaps, selected, pair, showNoise, sizes) {
   const gap = gaps[selected];
+  const { noise, others, pair: focus, halo, pairOutline } = MAP_STYLE;
   return [
-    { ...paperTrace(prep.noise, { size: 3.5, color: COLOURS.noise, opacity: DIM, uid: "noise" }), visible: showNoise },
-    paperTrace(pair.others, { size: 5.5, color: COLOURS.papers, opacity: DIM, uid: "others" }),
-    paperTrace(pair.inA, { size: 7, color: COLOURS.a, opacity: 0.95, uid: "topic-a" }),
-    paperTrace(pair.inB, { size: 7, color: COLOURS.b, opacity: 0.95, uid: "topic-b" }),
+    { ...paperTrace(prep.noise, { size: sizes.noise, color: noise.color, opacity: noise.opacity, uid: "noise" }), visible: showNoise },
+    paperTrace(pair.others, { size: sizes.others, color: others.color, opacity: others.opacity, uid: "others" }),
+    paperTrace(pair.inA, { size: sizes.halo, color: COLOURS.a, opacity: halo.opacity, uid: "halo-a", halo: true }),
+    paperTrace(pair.inB, { size: sizes.halo, color: COLOURS.b, opacity: halo.opacity, uid: "halo-b", halo: true }),
+    paperTrace(pair.inA, { size: sizes.pair, color: COLOURS.a, opacity: focus.opacity, uid: "topic-a", line: pairOutline }),
+    paperTrace(pair.inB, { size: sizes.pair, color: COLOURS.b, opacity: focus.opacity, uid: "topic-b", line: pairOutline }),
     { // dashed link: topic A centre -> gap -> topic B centre
       type: "scatter", mode: "lines", uid: "link",
       x: [pair.a.x, gap.x, pair.b.x], y: [pair.a.y, gap.y, pair.b.y],
@@ -185,7 +194,9 @@ function buildTraces(prep, gaps, selected, pair, showNoise) {
 }
 
 /** The interactive map: papers as dots, gaps as numbered stars. */
-export default function MapView({ data, selected, onSelectGap, showNoise, showAllNames, highlightPaper, toolbar, showHint }) {
+export default function MapView({
+  data, selected, onSelectGap, showNoise, showAllNames, highlightPaper, toolbar, showHint, dotSize = "M",
+}) {
   const container = useRef(null);
   const plotted = useRef(null); // { field, selected } currently drawn
   const ready = useRef(Promise.resolve());
@@ -196,8 +207,22 @@ export default function MapView({ data, selected, onSelectGap, showNoise, showAl
   const prep = useMemo(() => prepare(data), [data]);
   const pair = useMemo(() => pairOf(prep, data.gaps[selected] ?? data.gaps[0]), [prep, data, selected]);
   useEffect(() => {
-    latest.current = { prep, pair, showAllNames, onSelectGap };
+    latest.current = { prep, pair, showAllNames, onSelectGap, dotScale: DOT_SCALES[dotSize] ?? 1 };
   });
+
+  // Marker sizes = dot-size setting x a modest zoom growth (one batched restyle).
+  const appliedSize = useRef(null);
+  const applySizes = useRef(() => {});
+  applySizes.current = () => {
+    const gd = container.current;
+    const r = currentRanges(gd);
+    if (!r) return;
+    const { prep: p, dotScale } = latest.current;
+    const scale = dotScale * zoomGrowth(p.full.x[1] - p.full.x[0], r.x[1] - r.x[0]);
+    if (appliedSize.current && Math.abs(appliedSize.current - scale) < 0.02) return;
+    appliedSize.current = scale;
+    return Plotly.restyle(gd, { "marker.size": sizesFor(dotSizes(scale)) }, SIZED);
+  };
 
   // Re-place labels (after zooming, or when the toggle changes).
   const refreshLabels = useRef(() => {});
@@ -230,7 +255,9 @@ export default function MapView({ data, selected, onSelectGap, showNoise, showAl
       annotations: [],
     };
     const config = { displayModeBar: false, displaylogo: false, scrollZoom: true, responsive: true, doubleClick: false };
-    const traces = buildTraces(prep, data.gaps, selected, pair, showNoise);
+    const scale = DOT_SCALES[dotSize] ?? 1;
+    appliedSize.current = scale;
+    const traces = buildTraces(prep, data.gaps, selected, pair, showNoise, dotSizes(scale));
     plotted.current = { field: data.field, selected };
 
     let timer;
@@ -245,7 +272,10 @@ export default function MapView({ data, selected, onSelectGap, showNoise, showAl
         const zoomed = Object.keys(event).some((k) => k.startsWith("xaxis.range") || k.startsWith("yaxis.range"));
         if (!zoomed || gd.__flying) return;
         clearTimeout(timer);
-        timer = setTimeout(() => refreshLabels.current(), 120);
+        timer = setTimeout(() => {
+          refreshLabels.current();
+          applySizes.current();
+        }, 120);
       });
       refreshLabels.current();
     });
@@ -264,8 +294,12 @@ export default function MapView({ data, selected, onSelectGap, showNoise, showAl
       const others = xyc(pair.others), inA = xyc(pair.inA), inB = xyc(pair.inB);
       await Plotly.restyle(
         gd,
-        { x: [others.x, inA.x, inB.x], y: [others.y, inA.y, inB.y], customdata: [others.customdata, inA.customdata, inB.customdata] },
-        [T.OTHERS, T.A, T.B],
+        {
+          x: [others.x, inA.x, inB.x, inA.x, inB.x],
+          y: [others.y, inA.y, inB.y, inA.y, inB.y],
+          customdata: [others.customdata, [], [], inA.customdata, inB.customdata],
+        },
+        [T.OTHERS, T.HALO_A, T.HALO_B, T.A, T.B],
       );
       await Plotly.restyle(
         gd,
@@ -284,6 +318,7 @@ export default function MapView({ data, selected, onSelectGap, showNoise, showAl
       refreshLabels.current();
       await flyTo(gd, boundsOf([...pair.inA, ...pair.inB, gap], 0.15), 600);
       refreshLabels.current();
+      await applySizes.current();
     });
   }, [selected, pair, data]);
 
@@ -303,6 +338,9 @@ export default function MapView({ data, selected, onSelectGap, showNoise, showAl
   useEffect(() => {
     ready.current = ready.current.then(() => Plotly.relayout(container.current, { dragmode }));
   }, [dragmode]);
+  useEffect(() => {
+    ready.current = ready.current.then(() => applySizes.current());
+  }, [dotSize]);
 
   // Resize with the container (panels collapse/expand without a window resize),
   // and free Plotly's memory when the map is removed from the page.

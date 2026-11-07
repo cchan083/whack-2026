@@ -11,6 +11,9 @@ import GapList from "./components/GapList.jsx";
 import GapDetail from "./components/GapDetail.jsx";
 import GapTable from "./components/GapTable.jsx";
 import VerdictNotice from "./components/VerdictNotice.jsx";
+import DotSizeControl from "./components/DotSizeControl.jsx";
+import { DEFAULT_DOT_SIZE, DOT_SCALES } from "./lib/mapStyle.js";
+import { readPref, writePref } from "./lib/prefs.js";
 import { Dialog, IconButton, Skeleton, StarGlyph, Switch } from "./components/ui.jsx";
 
 export default function App() {
@@ -35,6 +38,11 @@ export default function App() {
   const [panelTab, setPanelTab] = useState("detail"); // medium/narrow layouts: "gaps" | "detail"
   const [interacted, setInteracted] = useState(false); // hide the map hint after the first selection
   const [verdictDismissed, setVerdictDismissed] = useState(null); // field whose verdict notice was closed
+  const [dotSize, setDotSize] = useState(() => {
+    const saved = readPref("dotSize");
+    return saved in DOT_SCALES ? saved : DEFAULT_DOT_SIZE;
+  });
+  useEffect(() => writePref("dotSize", dotSize), [dotSize]);
   const [highlightPaper, setHighlightPaper] = useState(null); // arXiv id hovered in the reading list
 
   const mapped = topics.filter((t) => t.clusters > 0);
@@ -297,11 +305,13 @@ export default function App() {
                   showAllNames={showAllNames}
                   highlightPaper={highlightPaper}
                   showHint={!interacted}
+                  dotSize={dotSize}
                   toolbar={
                     <div className="map-toolbar float">
                       <h2 id="map-heading" tabIndex={-1}>{mapData.name}</h2>
                       <Switch checked={showAllNames} onChange={setShowAllNames}>Show every topic name</Switch>
                       <Switch checked={showNoise} onChange={setShowNoise}>Show unclustered papers</Switch>
+                      <DotSizeControl value={dotSize} onChange={setDotSize} />
                     </div>
                   }
                 />
