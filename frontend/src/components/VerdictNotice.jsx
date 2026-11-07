@@ -33,7 +33,11 @@ export default function VerdictNotice({ assessment, onTryAnother, onDismiss, var
       <Icon name="alert" className="verdict-icon" />
       <div className="verdict-body">
         <p className="verdict-title">{TITLES[verdict]}</p>
-        <p className="verdict-text">{assessment.message}</p>
+        <p className="verdict-text">
+          {verdict === "limited"
+            ? `Only ${assessment.strong_gaps} of ${assessment.total_gaps} gaps ${assessment.strong_gaps === 1 ? "is" : "are"} promising, so there may be little room to expand research here.`
+            : assessment.message}
+        </p>
         {verdict === "none" && onTryAnother && (
           <div className="verdict-actions">
             <Button variant="primary" size="sm" onClick={onTryAnother}>Try another topic</Button>

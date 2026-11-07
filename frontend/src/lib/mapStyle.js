@@ -15,7 +15,7 @@ export const MAP_STYLE = {
   // Ring around papers published in the timeline's current year.
   newcomer: { extraSize: 3, width: 1.5, color: "#f0efec" },
   // Dots grow a little as you zoom in: base x clamp((fullSpan / span) ^ exponent, 1, maxGrowth).
-  zoom: { exponent: 0.3, maxGrowth: 2 },
+  zoom: { exponent: 0.3, maxGrowth: 1.6 },
 };
 
 /** The "Dot size" control: multipliers for every dot size above. */

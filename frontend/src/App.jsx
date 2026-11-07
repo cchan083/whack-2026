@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildTopic, getCategories, getJob, getTopicMap, getTopics } from "./api.js";
 import { COLOURS, prefersReducedMotion } from "./theme.js";
 import { readHash, writeHash } from "./lib/hash.js";
-import { isTypingTarget, useLayout } from "./lib/hooks.js";
+import { isTypingTarget, useLayout, useMediaQuery } from "./lib/hooks.js";
 import TopicSearch from "./components/TopicSearch.jsx";
 import TopicSwitcher from "./components/TopicSwitcher.jsx";
 import StatPills from "./components/StatPills.jsx";
@@ -18,6 +18,9 @@ import { Dialog, IconButton, Skeleton, StarGlyph, Switch } from "./components/ui
 
 export default function App() {
   const layout = useLayout();
+  const wideSearch = useMediaQuery("(min-width: 1100px)"); // narrower: the search collapses to an icon
+  const islandRef = useRef(null);
+  const searchRef = useRef(null);
 
   const [topics, setTopics] = useState([]); // every topic in the database
   const [categories, setCategories] = useState([]);
@@ -37,7 +40,9 @@ export default function App() {
   const [detailCollapsed, setDetailCollapsed] = useState(false);
   const [panelTab, setPanelTab] = useState("detail"); // medium/narrow layouts: "gaps" | "detail"
   const [interacted, setInteracted] = useState(false); // hide the map hint after the first selection
-  const [verdictDismissed, setVerdictDismissed] = useState(null); // field whose verdict notice was closed
+  const [verdictDismissed, setVerdictDismissed] = useState(null); // field whose "no clear gaps" card was closed
+  const [toastField, setToastField] = useState(null); // field whose "few promising gaps" toast is showing
+  const toastSeen = useRef(new Set()); // the toast shows at most once per topic per visit
   const [dotSize, setDotSize] = useState(() => {
     const saved = readPref("dotSize");
     return saved in DOT_SCALES ? saved : DEFAULT_DOT_SIZE;
@@ -92,7 +97,7 @@ export default function App() {
         await refreshTopics();
         setField(result.field);
       } else {
-        setJob({ id: result.job_id, topic, progress: 0, message: "Starting…" });
+        setJob({ id: result.job_id, topic, progress: 0, message: "Starting…", startedAt: Date.now() });
       }
     } catch (e) {
       setError(e.message);
@@ -126,12 +131,15 @@ export default function App() {
     return () => clearInterval(timer);
   }, [job?.id, refreshTopics]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cmd/Ctrl+K opens the topic switcher.
+  // Cmd/Ctrl+K opens the topic switcher; "/" focuses the search.
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setSwitcherOpen(true);
+      } else if (e.key === "/" && !isTypingTarget(e.target) && !document.querySelector("dialog[open]")) {
+        e.preventDefault();
+        searchRef.current?.focus();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -215,6 +223,20 @@ export default function App() {
       ?.scrollIntoView({ block: "nearest", behavior: prefersReducedMotion() ? "auto" : "smooth" });
   }, [selected, panelTab, layout]);
 
+  // "Few promising gaps" toast: once per topic, gone after about 8 s (the rail banner stays).
+  useEffect(() => {
+    const f = mapData?.field;
+    if (!f || mapData.assessment?.verdict !== "limited" || toastSeen.current.has(f)) return;
+    toastSeen.current.add(f);
+    setToastField(f);
+  }, [mapData]);
+  useEffect(() => setToastField(null), [field]); // leaving a topic ends its toast
+  useEffect(() => {
+    if (!toastField) return;
+    const t = setTimeout(() => setToastField(null), 8000);
+    return () => clearTimeout(t);
+  }, [toastField]);
+
   const clustersById = useMemo(
     () => Object.fromEntries((mapData?.clusters ?? []).map((c) => [c.id, c])),
     [mapData],
@@ -247,38 +269,35 @@ export default function App() {
     <div className="app">
       <a className="skip-link" href="#map-heading">Skip to map</a>
       <header className="topbar">
-        <h1 className="wordmark">
-          <StarGlyph size={14} className="wordmark-star" />
-          <span>Research Gap Finder</span>
-        </h1>
-        <TopicSwitcher
-          topics={mapped}
-          field={field}
-          onSelect={setField}
-          open={switcherOpen}
-          onOpenChange={setSwitcherOpen}
-        />
-        <div className="topbar-search">
+        <h1 className="wordmark">Research Gap Finder</h1>
+        <div className="island floating-surface" ref={islandRef}>
+          <StarGlyph size={14} className="island-star" />
+          <TopicSwitcher
+            topics={mapped}
+            field={field}
+            onSelect={setField}
+            open={switcherOpen}
+            onOpenChange={setSwitcherOpen}
+          />
+          <span className="island-sep" aria-hidden="true" />
           <TopicSearch
+            ref={searchRef}
             categories={categories}
-            busy={Boolean(job)}
+            job={job}
             onBuild={handleBuild}
-            compact={layout !== "wide"}
+            topics={mapped}
+            onOpenTopic={setField}
+            anchorRef={islandRef}
+            collapsible={!wideSearch}
           />
         </div>
-        {layout === "wide" && <StatPills data={mapData} loading={loadingMap} />}
+        <div className="topbar-stats">
+          {layout === "wide" && <StatPills data={mapData} loading={loadingMap} variant="text" />}
+        </div>
       </header>
 
-      {(job || error) && (
+      {error && (
         <div className="banners">
-          {job && (
-            <div className="progress" role="status" aria-live="polite">
-              <p><strong>Building a map for “{job.topic}”</strong>: {job.message}</p>
-              <div className="progress-track">
-                <div className="progress-fill" style={{ width: `${Math.round((job.progress || 0) * 100)}%` }} />
-              </div>
-            </div>
-          )}
           {error && (
             <div className="alert" role="alert">
               <span>{error}</span>
@@ -327,12 +346,15 @@ export default function App() {
                   </button>
                 </div>
               )}
-              {hasGaps && verdictDismissed !== mapData.field && (
+              {hasGaps && mapData.assessment?.verdict === "none" && verdictDismissed !== mapData.field && (
                 <VerdictNotice
                   assessment={mapData.assessment}
                   onTryAnother={() => setSwitcherOpen(true)}
                   onDismiss={() => setVerdictDismissed(mapData.field)}
                 />
+              )}
+              {hasGaps && mapData.assessment?.verdict === "limited" && toastField === mapData.field && (
+                <VerdictNotice assessment={mapData.assessment} onDismiss={() => setToastField(null)} />
               )}
               {loadingMap && <Skeleton className="map-skeleton map-loading" />}
               {layout === "wide" && detailCollapsed && hasGaps && (
