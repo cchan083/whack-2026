@@ -110,10 +110,16 @@ export default function MapView({ data, selected, onSelectGap, showNoise, showAl
     });
   }, [data, selected, showNoise, showAllNames, colours, onSelectGap]);
 
-  // Free Plotly's memory when the map is removed from the page.
+  // Resize with the container (panels collapse/expand without a window resize),
+  // and free Plotly's memory when the map is removed from the page.
   useEffect(() => {
     const element = container.current;
-    return () => Plotly.purge(element);
+    const observer = new ResizeObserver(() => element.data && Plotly.Plots.resize(element));
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      Plotly.purge(element);
+    };
   }, []);
 
   return (

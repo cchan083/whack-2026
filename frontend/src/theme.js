@@ -10,6 +10,7 @@ export const COLOURS = {
   ink: "#f0efec",
   muted: "#a09e98",
   card: "#1a1a19",
+  ring: "#1a1a19",
   raised: "#232321",
   hairline: "rgba(240,239,236,0.14)",
 };
