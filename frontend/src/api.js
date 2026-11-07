@@ -1,8 +1,12 @@
 // All calls to the FastAPI backend. Paths start with /api, which Vite forwards
 // to port 8000 in development (see vite.config.js).
+//
+// When the frontend is hosted separately (e.g. GitHub Pages), set VITE_API_URL
+// at build time to the backend's address, e.g. https://name-space.hf.space
+const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
 
 async function request(path, options) {
-  const response = await fetch(`/api${path}`, options);
+  const response = await fetch(`${API_BASE}/api${path}`, options);
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     // FastAPI puts error messages in "detail" (a list for invalid input).

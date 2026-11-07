@@ -1,0 +1,12 @@
+# Keep the Docker build small and secret-free.
+.env
+.env.*
+.git
+.github
+.venv
+**/__pycache__
+**/node_modules
+frontend/dist
+notebooks
+tests
+*.png

@@ -1,15 +1,17 @@
-streamlit
-plotly
-sqlmodel
-psycopg2-binary
-pgvector
-python-dotenv
-arxiv
-fastembed
-umap-learn
-scikit-learn
-numpy
-scipy
-pandas
-fastapi
-uvicorn
+# Exact versions known to work together (Python 3.13). The Docker image uses
+# these too, so the hosted app matches local development.
+streamlit==1.67.0
+plotly==7.1.0
+sqlmodel==0.0.48
+psycopg2-binary==2.9.13
+pgvector==0.5.1
+python-dotenv==1.2.4
+arxiv==4.0.2
+fastembed==0.9.1
+umap-learn==0.5.12
+scikit-learn==1.9.1
+numpy==2.5.4
+scipy==1.18.1
+pandas==3.1.1
+fastapi==0.162.2
+uvicorn==0.54.0
