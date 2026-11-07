@@ -714,3 +714,30 @@ th[aria-sort="none"] .sort-glyph { opacity: 0.5; }
 @media (prefers-reduced-motion: reduce) {
   .tl-bars rect, .paper-link { transition: none; }
 }
+
+/* --- Paper card (click a dot) ---------------------------------------------- */
+
+.paper-card {
+  position: absolute; z-index: 30;
+  width: min(320px, calc(100% - 16px));
+  padding: var(--s-3);
+  display: grid; gap: var(--s-2);
+  background: var(--surface-raised);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-lg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  animation: pop-in var(--dur-fast) var(--ease);
+}
+.paper-card-head { display: flex; align-items: flex-start; gap: var(--s-2); }
+.paper-card-title {
+  flex: 1; font-size: var(--fs-md); font-weight: 600; line-height: 1.4; color: var(--text);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.paper-card-close { width: 26px; height: 26px; margin: -4px -4px 0 0; flex: none; }
+.paper-card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--text-2); }
+.paper-card-meta b { font-weight: 600; color: var(--text); }
+.paper-card-actions { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+.paper-card-actions .btn { text-decoration: none; }
+.paper-card-id { font-size: var(--fs-xs); color: var(--text-muted); }
+.paper-card-hint { font-size: var(--fs-xs); color: var(--text-muted); }
+@media (hover: none) { .paper-card-hint { display: none; } }

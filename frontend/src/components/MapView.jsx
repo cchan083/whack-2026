@@ -5,6 +5,7 @@ import { boundsOf, currentRanges, flyTo, zoomBy } from "../lib/mapNav.js";
 import { DOT_SCALES, MAP_STYLE, dotSizes, zoomGrowth } from "../lib/mapStyle.js";
 import { byYear, countUpTo, yearOf } from "../lib/timeline.js";
 import { Icon, IconButton, StarGlyph } from "./ui.jsx";
+import PaperCard, { arxivUrl } from "./PaperCard.jsx";
 
 // Traces are always in this order, so updates can target them by index.
 const T = {
@@ -36,7 +37,10 @@ const xyc = (papers) => ({
 });
 
 const PAPER_HOVER =
-  "<b>%{customdata[0]}</b><br><span style='color:#a09e98'>%{customdata[1]} · %{customdata[2]}</span><extra></extra>";
+  "<b>%{customdata[0]}</b><br><span style='color:#a09e98'>%{customdata[1]} · %{customdata[2]}</span>" +
+  "<br><span style='color:#3cc795'>Click for details and the arXiv link</span><extra></extra>";
+// Traces whose points are papers (clicking one opens its card).
+const PAPER_TRACES = new Set([T.NOISE, T.OTHERS, T.A, T.B]);
 
 function paperTrace(points, { size, color, opacity, uid, line, halo = false }) {
   return {
@@ -59,6 +63,7 @@ function prepare(data) {
       hoverTitle(p.title),
       p.year,
       p.cluster_id == null ? "Unclustered" : shortName(byId[p.cluster_id]?.label),
+      p.arxiv_id, // [3]: which paper a click refers to
     ],
   }));
   const scores = data.gaps.map((g) => g.score);
@@ -234,12 +239,15 @@ export default function MapView({
   const ready = useRef(Promise.resolve());
   const latest = useRef({});
   const [dragmode, setDragmode] = useState("pan");
+  const [card, setCard] = useState(null); // { id, x, y }: the paper card pinned where its dot was clicked
   const [legendOpen, setLegendOpen] = useState(() => window.innerWidth >= 768);
 
   const prep = useMemo(() => prepare(data), [data]);
   const pair = useMemo(() => pairOf(prep, data.gaps[selected] ?? data.gaps[0]), [prep, data, selected]);
   useEffect(() => {
-    latest.current = { prep, pair, showAllNames, onSelectGap, dotScale: DOT_SCALES[dotSize] ?? 1, playhead, showNoise };
+    latest.current = {
+      prep, pair, showAllNames, onSelectGap, dotScale: DOT_SCALES[dotSize] ?? 1, playhead, showNoise,
+    };
   });
 
   // Marker sizes = dot-size setting x a modest zoom growth (one batched restyle).
@@ -300,12 +308,29 @@ export default function MapView({
       gd.removeAllListeners?.("plotly_click");
       gd.removeAllListeners?.("plotly_relayout");
       gd.on("plotly_click", (event) => {
-        const point = event.points.find((p) => p.curveNumber === T.STARS);
-        if (point) latest.current.onSelectGap(point.pointIndex);
+        const star = event.points.find((p) => p.curveNumber === T.STARS);
+        if (star) {
+          latest.current.onSelectGap(star.pointIndex);
+          return;
+        }
+        const point = event.points.find((p) => PAPER_TRACES.has(p.curveNumber));
+        const id = point?.customdata?.[3];
+        if (!id) return;
+        const e = event.event;
+        if (e?.metaKey || e?.ctrlKey) {
+          // Cmd/Ctrl-click: straight to arXiv, no card.
+          window.open(arxivUrl(id), "_blank", "noopener,noreferrer");
+          return;
+        }
+        const r = gd.getBoundingClientRect();
+        Plotly.Fx.unhover(gd); // the card replaces the hover box (which lingers after a tap)
+        setCard({ id, x: e.clientX - r.left, y: e.clientY - r.top });
       });
       gd.on("plotly_relayout", (event) => {
         const zoomed = Object.keys(event).some((k) => k.startsWith("xaxis.range") || k.startsWith("yaxis.range"));
-        if (!zoomed || gd.__flying) return;
+        if (!zoomed) return;
+        setCard(null); // the card is pinned to a screen position: close it on pan/zoom
+        if (gd.__flying) return;
         clearTimeout(timer);
         timer = setTimeout(() => {
           refreshLabels.current();
@@ -370,13 +395,17 @@ export default function MapView({
   }, [playhead, showNoise]);
 
   useEffect(() => {
-    const found = highlightPaper ? prep.byArxiv[highlightPaper] : null;
+    const id = highlightPaper ?? card?.id; // reading-list hover wins, else the open card's paper
+    const found = id ? prep.byArxiv[id] : null;
     // A paper hidden by the timeline isn't highlighted.
     const p = found && (playhead == null || found.year <= playhead) ? found : null;
     ready.current = ready.current.then(() =>
       Plotly.restyle(container.current, { x: [p ? [p.x] : []], y: [p ? [p.y] : []] }, [T.PAPER]),
     );
-  }, [highlightPaper, prep, playhead]);
+  }, [highlightPaper, card, prep, playhead]);
+
+  // Close the card when the topic, selected gap or timeline year changes.
+  useEffect(() => setCard(null), [prep, selected, playhead]);
   useEffect(() => {
     ready.current = ready.current.then(() => Plotly.relayout(container.current, { dragmode }));
   }, [dragmode]);
@@ -464,6 +493,20 @@ export default function MapView({
         />
       </div>
       {overlay}
+      {card && prep.byArxiv[card.id] && (
+        <PaperCard
+          paper={prep.byArxiv[card.id]}
+          topic={prep.byId[prep.byArxiv[card.id].cluster_id]}
+          group={
+            prep.byArxiv[card.id].cluster_id === pair.a.id ? "a"
+              : prep.byArxiv[card.id].cluster_id === pair.b.id ? "b" : null
+          }
+          x={card.x}
+          y={card.y}
+          bounds={container.current?.getBoundingClientRect()}
+          onClose={() => setCard(null)}
+        />
+      )}
     </>
   );
 }
