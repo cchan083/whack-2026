@@ -10,6 +10,7 @@ import MapView from "./components/MapView.jsx";
 import GapList from "./components/GapList.jsx";
 import GapDetail from "./components/GapDetail.jsx";
 import GapTable from "./components/GapTable.jsx";
+import VerdictNotice from "./components/VerdictNotice.jsx";
 import { Dialog, IconButton, Skeleton, StarGlyph, Switch } from "./components/ui.jsx";
 
 export default function App() {
@@ -33,6 +34,7 @@ export default function App() {
   const [detailCollapsed, setDetailCollapsed] = useState(false);
   const [panelTab, setPanelTab] = useState("detail"); // medium/narrow layouts: "gaps" | "detail"
   const [interacted, setInteracted] = useState(false); // hide the map hint after the first selection
+  const [verdictDismissed, setVerdictDismissed] = useState(null); // field whose verdict notice was closed
   const [highlightPaper, setHighlightPaper] = useState(null); // arXiv id hovered in the reading list
 
   const mapped = topics.filter((t) => t.clusters > 0);
@@ -220,6 +222,7 @@ export default function App() {
       onCompare={() => setCompareOpen(true)}
       listRef={listRef}
       onKeyDown={onListKeyDown}
+      notice={<VerdictNotice assessment={mapData.assessment} variant="inline" />}
     />
   );
   const gapDetail = hasGaps && (
@@ -303,9 +306,23 @@ export default function App() {
                   }
                 />
               ) : (
-                <p className="empty">
-                  <strong id="map-heading">{mapData.name}</strong>: no gaps found for this topic. Try a broader search.
-                </p>
+                <div className="empty">
+                  <h2 id="map-heading" className="empty-title">{mapData.name}</h2>
+                  <p>
+                    {mapData.assessment?.message ??
+                      "No gaps found for this topic. Try a broader search."}
+                  </p>
+                  <button type="button" className="btn btn-primary btn-md" onClick={() => setSwitcherOpen(true)}>
+                    Try another topic
+                  </button>
+                </div>
+              )}
+              {hasGaps && verdictDismissed !== mapData.field && (
+                <VerdictNotice
+                  assessment={mapData.assessment}
+                  onTryAnother={() => setSwitcherOpen(true)}
+                  onDismiss={() => setVerdictDismissed(mapData.field)}
+                />
               )}
               {loadingMap && <Skeleton className="map-skeleton map-loading" />}
               {layout === "wide" && detailCollapsed && hasGaps && (

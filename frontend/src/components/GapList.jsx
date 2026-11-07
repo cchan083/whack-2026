@@ -2,7 +2,7 @@ import { shortName } from "../theme.js";
 import { Button, StatusPill } from "./ui.jsx";
 
 /** Ranked list of gaps (the rail). Each row is a button; the selected one has aria-current. */
-export default function GapList({ gaps, clustersById, selected, onSelect, onCompare, listRef, onKeyDown }) {
+export default function GapList({ gaps, clustersById, selected, onSelect, onCompare, listRef, onKeyDown, notice }) {
   const best = Math.max(...gaps.map((g) => g.score), 1e-9);
   return (
     <nav className="gap-list" aria-label="Ranked research gaps">
@@ -16,6 +16,7 @@ export default function GapList({ gaps, clustersById, selected, onSelect, onComp
           </Button>
         )}
       </div>
+      {notice}
       <ol className="gap-rows" ref={listRef} onKeyDown={onKeyDown}>
         {gaps.map((g, i) => {
           const a = shortName(clustersById[g.cluster_a]?.label);

@@ -473,3 +473,41 @@ th[aria-sort="none"] .sort-glyph { opacity: 0.5; }
   .map-toolbar { gap: var(--s-1) var(--s-3); padding: 6px var(--s-2); }
   .map-toolbar h2 { width: 100%; font-size: var(--fs-md); }
 }
+
+/* --- Topic verdict ("no clear gaps" / "few promising gaps") ------------------ */
+
+.verdict {
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(440px, calc(100% - 32px));
+  display: flex; gap: var(--s-3); align-items: flex-start;
+  padding: var(--s-4);
+  border-color: rgba(240, 180, 60, 0.45);
+  animation: pop-in var(--dur-med) var(--ease);
+}
+.verdict-limited {
+  top: auto; bottom: var(--s-3); transform: translateX(-50%);
+  width: min(520px, calc(100% - 120px));
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  align-items: center;
+}
+.verdict-limited .verdict-text { font-size: var(--fs-sm); line-height: 1.4; }
+.verdict-icon { color: var(--warn); flex: none; margin-top: 2px; }
+.verdict-limited .verdict-icon { margin-top: 0; }
+.verdict-body { display: grid; gap: var(--s-2); min-width: 0; }
+.verdict-limited .verdict-body { gap: 2px; }
+.verdict-title { font-weight: 600; font-size: var(--fs-base); }
+.verdict-limited .verdict-title { font-size: var(--fs-md); font-weight: 500; }
+.verdict-text { color: var(--text-2); font-size: var(--fs-md); line-height: 1.5; }
+.verdict-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-1); }
+.verdict-close { margin-left: auto; flex: none; }
+
+.verdict-inline {
+  display: flex; gap: var(--s-2); align-items: flex-start;
+  margin: var(--s-2) var(--s-2) 0; padding: var(--s-2) var(--s-3);
+  border: 1px solid rgba(240, 180, 60, 0.35); border-radius: var(--r-md);
+  background: rgba(240, 180, 60, 0.08); color: var(--text-2); font-size: var(--fs-sm);
+}
+.verdict-inline svg { color: var(--warn); flex: none; margin-top: 2px; }
+
+.empty-title { font-size: var(--fs-lg); margin-bottom: var(--s-2); }
+.empty .btn { margin-top: var(--s-4); }
