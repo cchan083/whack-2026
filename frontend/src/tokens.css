@@ -1,0 +1,86 @@
+/* Design tokens. Dark theme only.
+   Contrast (WCAG) checked against --surface-card (#1a1a19):
+     --text      #f0efec  15.6:1
+     --text-2    #c3c2b7   9.9:1
+     --text-muted #a09e98  6.6:1 (5.9:1 on --surface-raised)
+     --accent    #199e70   5.1:1 as text; dark text on accent = 5.5:1
+     --border-control #6f6e69  3.3:1 (form-control boundaries) */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --surface-page: #121211;
+  --surface-card: #1a1a19;
+  --surface-raised: #232321;
+  --surface-hover: #2a2a28;
+  --hairline: rgba(240, 239, 236, 0.08);
+  --hairline-strong: rgba(240, 239, 236, 0.14);
+  --border-control: #6f6e69;
+
+  /* Text */
+  --text: #f0efec;
+  --text-2: #c3c2b7;
+  --text-muted: #a09e98;
+  --text-on-accent: #121211;
+
+  /* One UI accent (the gap green), plus the two reserved topic colours. */
+  --accent: #199e70;
+  --accent-hover: #1fb582;
+  --accent-soft: rgba(25, 158, 112, 0.16);
+  --accent-text: #3cc795; /* accent used as text on dark surfaces: 7.9:1 */
+  --topic-a: #3987e5;
+  --topic-b: #d95926;
+  --paper: #898781;
+  --paper-noise: #52514e;
+
+  /* Status */
+  --good: #3cc795;
+  --warn: #f0b43c;
+  --danger: #f08a8a;
+  --danger-bg: rgba(240, 138, 138, 0.1);
+
+  /* Type */
+  --font-ui: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-base: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+
+  /* 4px spacing scale */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+
+  /* Radii */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+
+  /* Elevation (floating elements only) */
+  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(240, 239, 236, 0.04) inset;
+
+  /* Motion */
+  --dur-fast: 150ms;
+  --dur-med: 250ms;
+  --dur-slow: 600ms;
+  --ease: cubic-bezier(0.65, 0, 0.35, 1);
+
+  --topbar-h: 56px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-med: 0ms;
+    --dur-slow: 0ms;
+  }
+}

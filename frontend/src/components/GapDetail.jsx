@@ -1,5 +1,4 @@
 import Markdown from "react-markdown";
-import { shortName } from "../theme.js";
 
 // Open paper links in a new tab so the map stays open.
 const markdownParts = {
@@ -33,24 +32,13 @@ function TopicLine({ name, cluster, colour }) {
 }
 
 /** Side panel: gap picker, the two topics, score, why it ranks here, and the dissertation idea. */
-export default function GapDetail({ gaps, clustersById, selected, onSelect, colours }) {
+export default function GapDetail({ gaps, clustersById, selected, colours }) {
   const gap = gaps[selected];
   const bestScore = Math.max(...gaps.map((g) => g.score), 1e-9); // bars are relative to the best gap
 
   return (
-    <section className="card gap-detail" aria-labelledby="gap-heading">
+    <section className="gap-detail" aria-labelledby="gap-heading">
       <h2 id="gap-heading" className="visually-hidden">Selected research gap</h2>
-      <div className="field">
-        <label htmlFor="gap-select">Research gap (ranked by score)</label>
-        <select id="gap-select" value={selected} onChange={(e) => onSelect(Number(e.target.value))}>
-          {gaps.map((g, i) => (
-            <option key={g.id} value={i}>
-              #{g.rank} {shortName(clustersById[g.cluster_a]?.label)} ↔ {shortName(clustersById[g.cluster_b]?.label)}
-            </option>
-          ))}
-        </select>
-      </div>
-
       {/* Coloured dots match the map; the text itself stays in normal ink. */}
       <ul className="topic-pair">
         <TopicLine name="Topic A" cluster={clustersById[gap.cluster_a]} colour={colours.a} />
