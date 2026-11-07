@@ -1,0 +1,28 @@
+# Copies the repo to the Hugging Face Space on every push to main; the Space
+# then rebuilds the Docker image (see Dockerfile) and restarts the app.
+#
+# One-time setup in GitHub -> Settings -> Secrets and variables -> Actions:
+#   Variable  HF_SPACE  e.g.  your-hf-username/research-gap-finder
+#   Secret    HF_TOKEN  a Hugging Face access token with "write" permission
+# Until HF_SPACE is set, this workflow is skipped.
+name: Deploy to Hugging Face Space
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # also allows a manual run from the Actions tab
+
+jobs:
+  deploy:
+    if: vars.HF_SPACE != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Hugging Face needs the full history to accept the push
+      - name: Push to the Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        # ${HF_SPACE%%/*} = the username part of "username/space-name".
+        run: git push --force "https://${HF_SPACE%%/*}:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" HEAD:main

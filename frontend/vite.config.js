@@ -5,6 +5,8 @@ import react from "@vitejs/plugin-react";
 // to /api is forwarded to the FastAPI server on port 8000.
 export default defineConfig({
   plugins: [react()],
+  // Path the site is served from: "/" normally, "/whack-2026/" on GitHub Pages.
+  base: process.env.VITE_BASE || "/",
   server: {
     port: 5173,
     proxy: { "/api": "http://localhost:8000" },

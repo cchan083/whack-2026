@@ -13,6 +13,7 @@ the frontend then checks GET /api/jobs/{id} every second for progress.
 """
 
 import json
+import os
 import threading
 import uuid
 from contextlib import asynccontextmanager
@@ -36,13 +37,23 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Research Gap Finder API", lifespan=lifespan)
 
-# Let the React dev server (Vite, port 5173) call the API from the browser.
+# Websites allowed to call this API from a browser: the Vite dev server and
+# the GitHub Pages site by default. Override with ALLOWED_ORIGINS (comma-separated)
+# on the hosting service. (The Docker image serves the frontend itself, which
+# doesn't need this.)
+DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,https://cchan083.github.io"
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[o.strip() for o in os.getenv("ALLOWED_ORIGINS", DEFAULT_ORIGINS).split(",") if o.strip()],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
+
+
+@app.get("/api/health")
+def health() -> dict:
+    """For uptime checks: answers without touching the database."""
+    return {"status": "ok"}
 
 
 # --- Reading maps -----------------------------------------------------------

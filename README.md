@@ -1,3 +1,14 @@
+---
+# Settings for Hugging Face Spaces (ignored by GitHub, which shows them as a small table).
+title: Research Gap Finder
+emoji: 🗺️
+colorFrom: green
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Research Gap Finder
 
 Map any research field from arXiv, group its papers into topics, and find the
@@ -5,9 +16,9 @@ gaps between related topics that few papers connect: dissertation ideas for stud
 
 ## Setup (once)
 
-1. Python: `python -m venv .venv`, then `.venv\Scripts\activate` and `pip install -r requirements.txt`
+1. Python 3.13: `python -m venv .venv`, then `.venv\Scripts\activate` and `pip install -r requirements.txt`
 2. Node.js LTS (for the React frontend): then `cd frontend` and `npm install`
-3. `.env` in the project folder with `DATABASE_URL=` set to the Supabase **Session pooler** URI
+3. Copy `.env.example` to `.env` and set `DATABASE_URL` to the Supabase **Session pooler** URI
    (host ends in `pooler.supabase.com`; the direct connection needs IPv6).
 
 ## Run the app
@@ -24,7 +35,42 @@ the backend: it then serves the app at http://localhost:8000.
 
 **Streamlit (quick alternative):** `streamlit run app.py`
 
-Both let you type any topic and build its map (about a minute per 600 papers).
+Both let you type any topic and build its map (about 2 minutes for 600 papers).
+
+## Deploy to Hugging Face Spaces (Docker)
+
+The `Dockerfile` builds one container with the backend and the React app, on port 7860.
+
+1. On huggingface.co: **New Space** → SDK **Docker** → **Blank** → hardware **CPU basic (free)**.
+2. In the Space: **Settings → Variables and secrets → New secret**: `DATABASE_URL` = the Session pooler URI.
+3. Get the code onto the Space, either:
+   - **Automatically (recommended):** in GitHub → **Settings → Secrets and variables → Actions**, add
+     variable `HF_SPACE` = `your-hf-username/your-space-name` and secret `HF_TOKEN` = a Hugging Face
+     access token with *write* permission. Every push to `main` then deploys
+     (`.github/workflows/deploy-huggingface.yml`).
+   - **Manually:** `git remote add hf https://huggingface.co/spaces/your-hf-username/your-space-name`
+     then `git push hf main` (use the access token as the password).
+4. The first build takes about 5–10 minutes. The app is then at
+   `https://your-hf-username-your-space-name.hf.space` (API docs at `/docs`).
+
+Free Spaces sleep after about 48 hours without visitors and take about 30 seconds to wake.
+Build jobs are tracked in memory, so a restart forgets builds in progress (finished maps are safe in the database).
+
+The Space serves the full app on its own. To also put the frontend on GitHub Pages, see below.
+
+## Frontend on GitHub Pages
+
+`.github/workflows/deploy-pages.yml` builds the React app and publishes it to
+`https://cchan083.github.io/whack-2026/`, talking to the backend on Hugging Face.
+
+1. Deploy the backend to Hugging Face first (above).
+2. GitHub → **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+3. GitHub → **Settings → Secrets and variables → Actions → Variables**: add `API_URL` =
+   the Space address, e.g. `https://your-hf-username-your-space-name.hf.space`.
+4. Run the workflow from the **Actions** tab (it also runs on every push that changes `frontend/`).
+
+The repo must be public for Pages on a free GitHub account. The backend already allows requests
+from `https://cchan083.github.io`; change the list with the `ALLOWED_ORIGINS` variable on the Space.
 
 ## Pipeline from the command line
 
@@ -50,3 +96,4 @@ python -m pipeline.gaps --field ml-climate
 | `api/main.py` | FastAPI backend for the React app |
 | `frontend/` | React + CSS frontend (Vite) |
 | `app.py` | Streamlit frontend |
+| `Dockerfile`, `.github/workflows/` | Hosting: backend on Hugging Face Spaces, frontend on GitHub Pages |
