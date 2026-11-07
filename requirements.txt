@@ -1,0 +1,13 @@
+streamlit
+plotly
+sqlmodel
+psycopg2-binary
+pgvector
+python-dotenv
+arxiv
+fastembed
+umap-learn
+scikit-learn
+numpy
+scipy
+pandas
