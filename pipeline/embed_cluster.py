@@ -8,8 +8,11 @@ Steps:
    Only papers without an embedding are processed, so re-runs are quick, and a
    paper already embedded in another field reuses that embedding.
 2. Map: squash those 384 numbers down to 2 (x, y) with UMAP, keeping similar
-   papers close together.
-3. Cluster: group papers that sit close together on the map with HDBSCAN.
+   papers close together. The 2D map is only for the picture.
+3. Cluster: a second UMAP run squashes the embeddings to 5 numbers instead,
+   and HDBSCAN groups papers in that 5D space. Two dimensions lose too much
+   (some topics merge, others split); 5 keeps the structure while still being
+   small enough for HDBSCAN. This is the approach BERTopic uses.
    Papers that don't fit any group are "noise" and get cluster_id = None.
 4. Save: replace this field's clusters (named with keywords from llm.py) and
    update every paper's x, y and cluster_id.
@@ -34,6 +37,7 @@ from pipeline import console_progress
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 SAVE_EVERY = 200  # embeddings saved to the database per round trip
+CLUSTER_DIMS = 5  # dimensions HDBSCAN clusters in (the map itself stays 2D)
 
 
 @cache  # load the model once per process, not once per run
@@ -98,10 +102,44 @@ def embed_missing(field: str, progress=console_progress) -> None:
     progress(f"Embedded {len(rows)}/{len(rows)} papers", 1.0)
 
 
+def layout_and_cluster(
+    vectors: np.ndarray,
+    min_cluster_size: int,
+    min_samples: int = 2,
+    cluster_dims: int = CLUSTER_DIMS,
+    progress=console_progress,
+) -> tuple[np.ndarray, np.ndarray]:
+    """2D map positions and cluster labels (-1 = noise) for these embeddings.
+
+    cluster_dims=2 reproduces the old behaviour (clustering on the map itself);
+    it is kept for pipeline.compare_clustering.
+    """
+    progress(f"Mapping {len(vectors)} papers to 2D...", 0.0)
+    # metric="cosine": compare embeddings by direction, the usual choice for text.
+    # random_state makes the map come out the same every run.
+    coords = umap.UMAP(
+        n_neighbors=15, min_dist=0.05, metric="cosine", random_state=42, n_jobs=1
+    ).fit_transform(vectors)
+
+    if cluster_dims == 2:
+        space = coords
+    else:
+        progress(f"Grouping papers into topics ({cluster_dims}D)...", 0.5)
+        # min_dist=0 packs similar papers tightly, which suits clustering (not display).
+        space = umap.UMAP(
+            n_components=cluster_dims, n_neighbors=15, min_dist=0.0, metric="cosine", random_state=42, n_jobs=1
+        ).fit_transform(vectors)
+
+    # min_cluster_size: smallest group that counts as a topic.
+    # min_samples: higher = stricter, more papers left out as noise.
+    labels = HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples, copy=True).fit_predict(space)
+    return coords, labels
+
+
 def map_and_cluster(
     field: str, min_cluster_size: int | None = None, min_samples: int = 2, progress=console_progress
 ) -> list[Cluster]:
-    """Steps 2-4: 2D map, clusters, and save. Returns the new clusters, largest first.
+    """Steps 2-4: 2D map, 5D clusters, and save. Returns the new clusters, largest first.
 
     min_cluster_size=None picks a size to suit the number of papers.
     """
@@ -119,17 +157,8 @@ def map_and_cluster(
     texts = [paper_text(r[1], r[2]) for r in rows]
     vectors = np.array([r[3] for r in rows])
 
-    progress(f"Mapping {len(rows)} papers to 2D...", 0.0)
-    # metric="cosine": compare embeddings by direction, the usual choice for text.
-    # random_state makes the map come out the same every run.
-    coords = umap.UMAP(
-        n_neighbors=15, min_dist=0.05, metric="cosine", random_state=42, n_jobs=1
-    ).fit_transform(vectors)
-
-    progress("Grouping papers into topics...", 0.7)
-    # min_cluster_size: smallest group that counts as a topic.
-    # min_samples: higher = stricter, more papers left out as noise.
-    labels = HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples, copy=True).fit_predict(coords)
+    coords, labels = layout_and_cluster(vectors, min_cluster_size, min_samples, progress=progress)
+    progress("Naming topics...", 0.9)
     cluster_numbers = sorted(set(labels) - {-1})  # -1 means noise
 
     texts_by_cluster = {c: [t for t, lab in zip(texts, labels) if lab == c] for c in cluster_numbers}
@@ -148,8 +177,10 @@ def map_and_cluster(
                 field=field,
                 label=llm.make_label(keywords[c]),
                 size=len(members),
-                centroid_x=float(members[:, 0].mean()),
-                centroid_y=float(members[:, 1].mean()),
+                # Median, not mean: a topic drawn in two pieces on the 2D map
+                # still gets its label on one of them, not in the empty space between.
+                centroid_x=float(np.median(members[:, 0])),
+                centroid_y=float(np.median(members[:, 1])),
             )
             session.add(new_clusters[c])
         session.flush()  # sends the inserts so each Cluster gets its database id
