@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import Plotly from "plotly.js-dist-min";
 import { shortName } from "../theme.js";
+import { boundsOf, flyTo } from "../lib/mapNav.js";
 
 // Traces are always added in the same order, so trace 5 is always the gaps.
 const GAP_TRACE = 5;
@@ -32,6 +33,7 @@ function paperTrace(papers, name, color, size, opacity, labelOf) {
 /** The interactive map: papers as dots, gaps as numbered stars. */
 export default function MapView({ data, selected, onSelectGap, showNoise, showAllNames, colours }) {
   const container = useRef(null);
+  const lastSelection = useRef(null); // `${field}:${selected}` already flown to
 
   useEffect(() => {
     const { papers, clusters, gaps } = data;
@@ -102,6 +104,13 @@ export default function MapView({ data, selected, onSelectGap, showNoise, showAl
 
     const config = { responsive: true, displaylogo: false, scrollZoom: true };
     Plotly.react(container.current, traces, layout, config).then((plot) => {
+      // Fly to the selected pair whenever the selection changes (not on first load).
+      const key = `${data.field}:${selected}`;
+      const previous = lastSelection.current;
+      lastSelection.current = key;
+      if (previous && previous !== key && previous.startsWith(`${data.field}:`)) {
+        flyTo(plot, boundsOf([...inA, ...inB], 0.15), 600);
+      }
       plot.removeAllListeners("plotly_click");
       plot.on("plotly_click", (event) => {
         const point = event.points.find((p) => p.curveNumber === GAP_TRACE);

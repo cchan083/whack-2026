@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildTopic, getCategories, getJob, getTopicMap, getTopics } from "./api.js";
-import { COLOURS } from "./theme.js";
+import { COLOURS, prefersReducedMotion } from "./theme.js";
 import { readHash, writeHash } from "./lib/hash.js";
-import { useLayout } from "./lib/hooks.js";
+import { isTypingTarget, useLayout } from "./lib/hooks.js";
 import TopicSearch from "./components/TopicSearch.jsx";
 import TopicSwitcher from "./components/TopicSwitcher.jsx";
 import StatPills from "./components/StatPills.jsx";
@@ -20,7 +20,9 @@ export default function App() {
   const [field, setField] = useState(() => readHash().field); // the topic being shown
   const [mapData, setMapData] = useState(null); // papers, clusters and gaps for `field`
   const [loadingMap, setLoadingMap] = useState(false);
-  const [selected, setSelected] = useState(0); // index of the selected gap
+  const [selected, setSelected] = useState(0); // index of the selected gap (shared by map, list, table)
+  const pendingGapRank = useRef(readHash().gapRank); // ?gap=N from the URL, applied once the map loads
+  const listRef = useRef(null);
   const [showNoise, setShowNoise] = useState(true);
   const [showAllNames, setShowAllNames] = useState(false);
   const [job, setJob] = useState(null); // topic currently being built, if any
@@ -52,14 +54,15 @@ export default function App() {
   // Whenever the topic changes, load its map.
   useEffect(() => {
     if (!field) return;
-    writeHash(field);
     let cancelled = false; // ignore the answer if the user switched topic meanwhile
     setLoadingMap(true);
     getTopicMap(field)
       .then((data) => {
         if (cancelled) return;
         setMapData(data);
-        setSelected(0);
+        const fromUrl = data.gaps.findIndex((g) => g.rank === pendingGapRank.current);
+        pendingGapRank.current = null;
+        setSelected(fromUrl >= 0 ? fromUrl : 0);
       })
       .catch((e) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoadingMap(false));
@@ -123,6 +126,77 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Keep the URL in sync: #field, plus ?gap=N when a gap other than #1 is selected.
+  const selectedRank = mapData?.field === field ? mapData.gaps[selected]?.rank : null;
+  useEffect(() => {
+    if (field) writeHash(field, selectedRank);
+  }, [field, selectedRank]);
+
+  // Follow manual URL edits and back/forward.
+  const latest = useRef({ field, mapData });
+  useEffect(() => {
+    latest.current = { field, mapData };
+  });
+  useEffect(() => {
+    const onHash = () => {
+      const { field: f, gapRank } = readHash();
+      if (!f) return;
+      if (f !== latest.current.field) {
+        pendingGapRank.current = gapRank;
+        setField(f);
+        return;
+      }
+      const i = latest.current.mapData?.gaps.findIndex((g) => g.rank === (gapRank ?? 1)) ?? -1;
+      if (i >= 0) setSelected(i);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  // j/k (and arrows when nothing else has focus) move through the ranked gaps.
+  const gapCount = mapData?.gaps.length ?? 0;
+  const moveSelection = useCallback(
+    (to) => setSelected((i) => Math.max(0, Math.min(gapCount - 1, typeof to === "function" ? to(i) : to))),
+    [gapCount],
+  );
+  useEffect(() => {
+    if (!gapCount) return;
+    const onKey = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target)) return;
+      if (document.querySelector("dialog[open]")) return;
+      const idle = e.target === document.body || e.target.closest?.(".map-area");
+      if (e.key === "j" || (idle && e.key === "ArrowDown")) moveSelection((i) => i + 1);
+      else if (e.key === "k" || (idle && e.key === "ArrowUp")) moveSelection((i) => i - 1);
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [gapCount, moveSelection]);
+
+  // Arrow keys / Home / End inside the list move selection and focus together (roving tabindex).
+  const onListKeyDown = useCallback(
+    (e) => {
+      const keys = { ArrowDown: (i) => i + 1, ArrowUp: (i) => i - 1, Home: () => 0, End: () => gapCount - 1 };
+      const move = keys[e.key];
+      if (!move) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const from = Number(e.target.closest("[data-index]")?.dataset.index ?? selected);
+      const next = Math.max(0, Math.min(gapCount - 1, move(from)));
+      setSelected(next);
+      listRef.current?.querySelector(`[data-index="${next}"]`)?.focus();
+    },
+    [gapCount, selected],
+  );
+
+  // Keep the selected row visible.
+  useEffect(() => {
+    listRef.current
+      ?.querySelector(`[data-index="${selected}"]`)
+      ?.scrollIntoView({ block: "nearest", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+  }, [selected, panelTab, layout]);
+
   const clustersById = useMemo(
     () => Object.fromEntries((mapData?.clusters ?? []).map((c) => [c.id, c])),
     [mapData],
@@ -137,6 +211,8 @@ export default function App() {
       selected={selected}
       onSelect={selectGap}
       onCompare={() => setCompareOpen(true)}
+      listRef={listRef}
+      onKeyDown={onListKeyDown}
     />
   );
   const gapDetail = hasGaps && (
