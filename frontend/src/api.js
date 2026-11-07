@@ -6,7 +6,16 @@
 const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
 
 async function request(path, options) {
-  const response = await fetch(`${API_BASE}/api${path}`, options);
+  let response;
+  try {
+    response = await fetch(`${API_BASE}/api${path}`, options);
+  } catch {
+    // No answer at all: server down, offline, or (on free hosting) still waking up.
+    throw new Error(
+      "Can't reach the server. If the site hasn't been used for a while it may be waking up: " +
+        "wait about 30 seconds, then refresh the page.",
+    );
+  }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     // FastAPI puts error messages in "detail" (a list for invalid input).

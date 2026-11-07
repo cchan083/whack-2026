@@ -56,9 +56,21 @@ The `Dockerfile` builds one container with the backend and the React app, on por
 Free Spaces sleep after about 48 hours without visitors and take about 30 seconds to wake.
 Build jobs are tracked in memory, so a restart forgets builds in progress (finished maps are safe in the database).
 
-**Frontend hosted elsewhere (e.g. GitHub Pages):** build it with `VITE_API_URL` set to the Space
-address and `VITE_BASE=/whack-2026/` (see `frontend/.env.example`). The backend already allows
-requests from `https://cchan083.github.io`; change the list with the `ALLOWED_ORIGINS` variable.
+The Space serves the full app on its own. To also put the frontend on GitHub Pages, see below.
+
+## Frontend on GitHub Pages
+
+`.github/workflows/deploy-pages.yml` builds the React app and publishes it to
+`https://cchan083.github.io/whack-2026/`, talking to the backend on Hugging Face.
+
+1. Deploy the backend to Hugging Face first (above).
+2. GitHub → **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+3. GitHub → **Settings → Secrets and variables → Actions → Variables**: add `API_URL` =
+   the Space address, e.g. `https://your-hf-username-your-space-name.hf.space`.
+4. Run the workflow from the **Actions** tab (it also runs on every push that changes `frontend/`).
+
+The repo must be public for Pages on a free GitHub account. The backend already allows requests
+from `https://cchan083.github.io`; change the list with the `ALLOWED_ORIGINS` variable on the Space.
 
 ## Pipeline from the command line
 
@@ -84,4 +96,4 @@ python -m pipeline.gaps --field ml-climate
 | `api/main.py` | FastAPI backend for the React app |
 | `frontend/` | React + CSS frontend (Vite) |
 | `app.py` | Streamlit frontend |
-| `Dockerfile`, `.github/workflows/` | Hosting on Hugging Face Spaces |
+| `Dockerfile`, `.github/workflows/` | Hosting: backend on Hugging Face Spaces, frontend on GitHub Pages |
