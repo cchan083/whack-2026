@@ -48,7 +48,8 @@ export default function TopicSearch({ categories, busy, onBuild }) {
         {busy ? "Building…" : "Build map"}
       </button>
       <p className="hint full">
-        New topics take about a minute per 600 papers. Topics already mapped open instantly.
+        New topics take about 2 minutes for 600 papers (download, mapping and a literature check of the top
+        gaps). Topics already mapped open instantly.
       </p>
     </form>
   );

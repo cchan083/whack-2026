@@ -43,6 +43,8 @@ python -m pipeline.gaps --field ml-climate
 | `pipeline/ingest.py` | Download papers from arXiv |
 | `pipeline/embed_cluster.py` | Embeddings, 2D map (UMAP), topics (HDBSCAN) |
 | `pipeline/gaps.py` | Score gaps between neighbouring topics |
+| `pipeline/validation.py` | Re-rank gaps: method + problem pairing, literature "Goldilocks zone" (arXiv counts), funding relevance |
+| `tests/` | Tests for the validation layer: `python -m tests.test_validation` |
 | `pipeline/run.py` | Run all steps for any typed topic |
 | `llm.py` | Topic labels and gap proposals (keywords + templates, no AI API needed) |
 | `api/main.py` | FastAPI backend for the React app |

@@ -4,7 +4,7 @@ Run `python db.py` to create the tables (safe to run more than once).
 """
 
 import os
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -57,6 +57,8 @@ class Cluster(SQLModel, table=True):
     size: int  # number of papers in the cluster
     centroid_x: float  # centre of the cluster on the 2D map
     centroid_y: float
+    # "Problem_Domain", "Methodological_Tool" or "Unclassified" (set by pipeline.validation).
+    category: Optional[str] = None
 
 
 class Gap(SQLModel, table=True):
@@ -64,10 +66,22 @@ class Gap(SQLModel, table=True):
     field: str = Field(index=True)
     cluster_a: int  # Cluster.id of one side of the gap
     cluster_b: int  # Cluster.id of the other side
-    score: float  # higher = more promising gap
+    score: float  # final ranking score (after validation); higher = more promising
     x: float  # where the gap sits on the 2D map
     y: float
     proposal: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    # Filled by pipeline.validation:
+    base_score: Optional[float] = None  # relatedness x emptiness, before validation
+    literature_count: Optional[int] = None  # arXiv papers mentioning both topics (None = not checked)
+    status: Optional[str] = None  # "promoted", "neutral", "demoted" or "needs_review"
+    reasons: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))  # JSON list
+
+
+class LiteratureCount(SQLModel, table=True):
+    """Cache of arXiv co-occurrence counts, so each query is only sent once."""
+    query: str = Field(primary_key=True)  # the exact arXiv search string
+    count: int
+    checked_at: datetime
 
 
 def init_db() -> None:
@@ -93,6 +107,13 @@ def _upgrade_existing_tables(conn) -> None:
         conn.execute(text("CREATE INDEX ix_paper_arxiv_id ON paper (arxiv_id)"))
     # ...and make (arxiv_id, field) unique instead.
     conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_arxiv_field ON paper (arxiv_id, field)"))
+
+    # Nov 2026: columns for the validation layer (pipeline/validation.py).
+    conn.execute(text("ALTER TABLE cluster ADD COLUMN IF NOT EXISTS category VARCHAR"))
+    conn.execute(text("ALTER TABLE gap ADD COLUMN IF NOT EXISTS base_score FLOAT"))
+    conn.execute(text("ALTER TABLE gap ADD COLUMN IF NOT EXISTS literature_count INTEGER"))
+    conn.execute(text("ALTER TABLE gap ADD COLUMN IF NOT EXISTS status VARCHAR"))
+    conn.execute(text("ALTER TABLE gap ADD COLUMN IF NOT EXISTS reasons TEXT"))
 
 
 if __name__ == "__main__":

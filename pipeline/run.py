@@ -145,13 +145,15 @@ def run_topic(
                 "Try fewer or broader words, or a different category."
             )
 
-        embed_cluster.embed_missing(field, progress=_stage(progress, 0.6, 0.85))
-        clusters = embed_cluster.map_and_cluster(field, progress=_stage(progress, 0.85, 0.95))
+        embed_cluster.embed_missing(field, progress=_stage(progress, 0.6, 0.75))
+        clusters = embed_cluster.map_and_cluster(field, progress=_stage(progress, 0.75, 0.8))
         if len(clusters) < 2:
             raise PipelineError(
                 f"The {n_papers} papers for '{topic}' are too similar to split into topics. Try a broader topic."
             )
-        gaps.find_gaps(field, progress=_stage(progress, 0.95, 1.0))
+        # The gaps step checks the literature for the top 20 candidates (arXiv
+        # asks for 3 s between requests, so about a minute). Cached afterwards.
+        gaps.find_gaps(field, max_lookups=20, progress=_stage(progress, 0.8, 1.0))
 
     progress("Done!", 1.0)
     return field

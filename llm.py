@@ -105,7 +105,7 @@ QUESTION_TEMPLATES = [
 ]
 
 
-def _topic_phrase(keywords: list[str], other: list[str], fallback: str) -> str:
+def topic_phrase(keywords: list[str], other: list[str], fallback: str) -> str:
     """Top keyword for the research question, skipping words the other cluster
     also has, so we never get "Can climate improve ... climate?"."""
     other_roots = set().union(*[_roots(k) for k in other[:3]])
@@ -127,8 +127,8 @@ def write_proposal(
     keywords_* come from cluster_keywords(); titles_* are example paper titles
     from each cluster (closest to the gap first, ideally).
     """
-    a = _topic_phrase(keywords_a, keywords_b, "area A")
-    b = _topic_phrase(keywords_b, keywords_a, "area B")
+    a = topic_phrase(keywords_a, keywords_b, "area A")
+    b = topic_phrase(keywords_b, keywords_a, "area B")
     # crc32 gives the same template for the same pair every run (Python's hash() doesn't).
     template = QUESTION_TEMPLATES[zlib.crc32(f"{a}|{b}".encode()) % len(QUESTION_TEMPLATES)]
 

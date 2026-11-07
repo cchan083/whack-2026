@@ -12,6 +12,7 @@ So POST /api/topics starts a background "job" and returns its id at once;
 the frontend then checks GET /api/jobs/{id} every second for progress.
 """
 
+import json
 import threading
 import uuid
 from contextlib import asynccontextmanager
@@ -80,12 +81,15 @@ def topic_map(field: str) -> dict:
             for p in papers
         ],
         "clusters": [
-            {"id": c.id, "label": c.label, "size": c.size, "x": c.centroid_x, "y": c.centroid_y}
+            {"id": c.id, "label": c.label, "size": c.size, "x": c.centroid_x, "y": c.centroid_y,
+             "category": c.category}
             for c in clusters
         ],
         "gaps": [
             {"id": g.id, "rank": rank, "cluster_a": g.cluster_a, "cluster_b": g.cluster_b,
-             "score": g.score, "x": g.x, "y": g.y, "proposal": g.proposal}
+             "score": g.score, "base_score": g.base_score, "literature_count": g.literature_count,
+             "status": g.status, "reasons": json.loads(g.reasons) if g.reasons else [],
+             "x": g.x, "y": g.y, "proposal": g.proposal}
             for rank, g in enumerate(gaps, start=1)
         ],
     }

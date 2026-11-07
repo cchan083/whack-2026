@@ -8,6 +8,7 @@ already built. Shows the papers as a 2D map, marks the gaps between related
 topics, and shows a dissertation idea for the selected gap.
 """
 
+import json
 import textwrap
 
 import pandas as pd
@@ -177,7 +178,8 @@ with st.sidebar:
         category_name = st.selectbox("arXiv category (optional)", ["Any"] + list(run.CATEGORIES))
         max_papers = st.slider(
             "Papers to download", 200, 1500, run.DEFAULT_MAX_PAPERS, step=100,
-            help="More papers give a richer map but take longer: roughly a minute per 600 new papers.",
+            help="More papers give a richer map but take longer: about 2 minutes for 600 new papers, "
+                 "including a literature check of the top gaps.",
         )
         build_clicked = st.form_submit_button("Build map", type="primary")
 
@@ -198,8 +200,11 @@ with st.sidebar:
             "2. Groups of nearby papers become **topics**.\n"
             "3. For each pair of neighbouring topics we check how **related** they are "
             "and how **empty** the space between them is.\n"
-            "4. **Score = relatedness × emptiness.** High score: two related topics "
-            "that few papers connect."
+            "4. Map score = relatedness × emptiness: two related topics that few papers connect.\n"
+            "5. Each candidate is then **validated**: it should apply one *method* to one *problem "
+            "domain*; it's boosted if 5–100 arXiv papers already mention both (a viable niche) and "
+            "demoted if over 500 do (saturated); pairs with no papers are flagged for a human to "
+            "check; and pairs touching a strategic funding area rank higher."
         )
 
 # Build a new topic: runs the whole pipeline here, with a progress bar.
@@ -265,15 +270,32 @@ with detail_col:
         help="Ranked by score. You can also click a star on the map.",
     )
     gap = gaps.iloc[selected]
-    label_a, label_b = labels[gap["cluster_a"]], labels[gap["cluster_b"]]
+    category = dict(zip(clusters["id"], clusters["category"])) if "category" in clusters else {}
+    kind = {"Problem_Domain": "problem domain", "Methodological_Tool": "method", "Unclassified": "unclassified"}
+
+    def topic_line(name: str, cluster_id: int, colour: str) -> str:
+        tag = f" `{kind.get(category.get(cluster_id), '')}`" if category.get(cluster_id) else ""
+        return f"<span style='color:{colour}; font-size:1.2em'>●</span> **{name}:** {labels[cluster_id]}{tag}"
 
     # Coloured dots match the map; the text itself stays in normal ink.
     st.markdown(
-        f"<span style='color:{colours['a']}; font-size:1.2em'>●</span> **Topic A:** {label_a}<br>"
-        f"<span style='color:{colours['b']}; font-size:1.2em'>●</span> **Topic B:** {label_b}",
+        topic_line("Topic A", gap["cluster_a"], colours["a"]) + "<br>"
+        + topic_line("Topic B", gap["cluster_b"], colours["b"]),
         unsafe_allow_html=True,
     )
-    st.progress(min(float(gap["score"]), 1.0), text=f"Gap score {gap['score']:.2f} (related topics × empty space)")
+    best_score = max(float(gaps["score"].max()), 1e-9)  # bar is relative to the best gap
+    base = gap.get("base_score")
+    st.progress(
+        min(float(gap["score"]) / best_score, 1.0),
+        text=f"Gap score {gap['score']:.2f}" + (f" (map score {base:.2f} before validation)" if pd.notna(base) else ""),
+    )
+    if isinstance(gap.get("reasons"), str):
+        status = {"promoted": "Promoted", "demoted": "Demoted", "neutral": "Neutral",
+                  "needs_review": "Needs human review"}.get(gap.get("status"), gap.get("status"))
+        with st.expander(f"Why it ranks here: {status}", expanded=gap.get("status") == "needs_review"):
+            st.markdown("\n".join(f"- {r}" for r in json.loads(gap["reasons"])))
+            if pd.notna(gap.get("literature_count")):
+                st.caption(f"{int(gap['literature_count']):,} arXiv papers already mention both topics.")
     with st.container(border=True):
         st.markdown(gap["proposal"] or "_No proposal written yet._")
 
@@ -291,10 +313,13 @@ table = pd.DataFrame({
     "Topic A": gaps["cluster_a"].map(labels),
     "Topic B": gaps["cluster_b"].map(labels),
     "Score": gaps["score"],
+    "Papers on both": gaps.get("literature_count"),
+    "Status": gaps.get("status"),
 })
 st.dataframe(
     table, hide_index=True, width="stretch",
-    column_config={"Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=1, format="%.2f")},
+    column_config={"Score": st.column_config.ProgressColumn(
+        "Score", min_value=0, max_value=float(gaps["score"].max()), format="%.2f")},
 )
 
 with st.expander(f"All {len(clusters)} topics"):

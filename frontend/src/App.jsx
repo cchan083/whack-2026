@@ -237,7 +237,14 @@ export default function App() {
                 <li>Each paper's title and abstract become a list of numbers (an embedding), then papers are placed on a 2D map so similar ones sit together.</li>
                 <li>Groups of nearby papers become <strong>topics</strong>.</li>
                 <li>For each pair of neighbouring topics we measure how <strong>related</strong> they are and how <strong>empty</strong> the space between them is.</li>
-                <li><strong>Score = relatedness × emptiness.</strong> A high score means two related topics that few papers connect.</li>
+                <li>Map score = relatedness × emptiness: two related topics that few papers connect.</li>
+                <li>
+                  Each candidate is then <strong>validated</strong>: it should apply one <em>method</em> to one{" "}
+                  <em>problem domain</em>; it is boosted if 5–100 arXiv papers already mention both (a viable
+                  niche) and demoted if over 500 do (saturated); pairs with no papers are flagged for a human to
+                  check; and pairs touching a strategic funding area (energy, materials, health, climate risk…) rank
+                  higher.
+                </li>
               </ol>
             </details>
           </>
