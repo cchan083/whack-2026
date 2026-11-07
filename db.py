@@ -9,7 +9,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, Text, text
+from sqlalchemy import Column, Index, Text, text
 from sqlmodel import Field, SQLModel, create_engine
 
 load_dotenv()  # reads DATABASE_URL from the .env file
@@ -30,8 +30,12 @@ EMBEDDING_DIMS = 384  # size of all-MiniLM-L6-v2 vectors
 
 
 class Paper(SQLModel, table=True):
+    # The same arXiv paper can belong to several fields (topics), so it is only
+    # a duplicate if both arxiv_id AND field match.
+    __table_args__ = (Index("uq_paper_arxiv_field", "arxiv_id", "field", unique=True),)
+
     id: Optional[int] = Field(default=None, primary_key=True)
-    arxiv_id: str = Field(unique=True, index=True)  # e.g. "2301.01234" (no version suffix)
+    arxiv_id: str = Field(index=True)  # e.g. "2301.01234" (no version suffix)
     title: str
     abstract: str = Field(sa_column=Column(Text, nullable=False))
     published: date
@@ -67,10 +71,28 @@ class Gap(SQLModel, table=True):
 
 
 def init_db() -> None:
-    """Create any tables that don't exist yet. Existing tables and data are left alone."""
+    """Create any missing tables and bring older tables up to date. Data is kept.
+    Safe to run any number of times."""
     with engine.begin() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     SQLModel.metadata.create_all(engine)
+    with engine.begin() as conn:
+        _upgrade_existing_tables(conn)
+
+
+def _upgrade_existing_tables(conn) -> None:
+    """create_all() never changes tables that already exist, so changes to
+    existing tables go here. Each step checks first, so re-running does nothing."""
+    # Nov 2026: arxiv_id used to be unique across all fields. Now a paper can
+    # be in several fields, so make the old index non-unique...
+    old_unique_index = conn.execute(text(
+        "SELECT 1 FROM pg_indexes WHERE indexname = 'ix_paper_arxiv_id' AND indexdef LIKE 'CREATE UNIQUE%'"
+    )).first()
+    if old_unique_index:
+        conn.execute(text("DROP INDEX ix_paper_arxiv_id"))
+        conn.execute(text("CREATE INDEX ix_paper_arxiv_id ON paper (arxiv_id)"))
+    # ...and make (arxiv_id, field) unique instead.
+    conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_arxiv_field ON paper (arxiv_id, field)"))
 
 
 if __name__ == "__main__":

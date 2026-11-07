@@ -3,9 +3,9 @@
 Run with:
     streamlit run app.py
 
-Shows a field's papers as a 2D map, marks the gaps between related topics,
-and shows a dissertation idea for the selected gap. All data comes from the
-database, so run the pipeline first (ingest -> embed_cluster -> gaps).
+Type any topic to build its map (about a minute for a new topic), or pick one
+already built. Shows the papers as a 2D map, marks the gaps between related
+topics, and shows a dissertation idea for the selected gap.
 """
 
 import textwrap
@@ -16,6 +16,7 @@ import streamlit as st
 from sqlmodel import Session, select
 
 from db import Cluster, Gap, Paper, engine
+from pipeline import run
 
 st.set_page_config(page_title="Research Gap Finder", layout="wide")
 
@@ -35,9 +36,8 @@ GAP_TRACE = 5
 # --- Data -------------------------------------------------------------------
 
 @st.cache_data(ttl=300)  # re-read the database at most every 5 minutes
-def load_fields() -> list[str]:
-    with Session(engine) as session:
-        return sorted(session.exec(select(Paper.field).distinct()).all())
+def load_topics() -> list[dict]:
+    return run.list_topics()
 
 
 @st.cache_data(ttl=300)
@@ -162,14 +162,33 @@ st.caption(
     "Stars mark unexplored territory between related topics: possible dissertation ideas."
 )
 
-fields = load_fields()
-if not fields:
-    st.info("No papers yet. Run `python -m pipeline.ingest` first.")
-    st.stop()
+topics = load_topics()
+built = {t["field"]: t for t in topics if t["clusters"] > 0}  # only topics with a finished map
+if "pending_field" in st.session_state:  # a map was just built: show it
+    st.session_state["field"] = st.session_state.pop("pending_field")
+    st.session_state["gap_pick"] = 0
+if st.session_state.get("field") not in built:  # e.g. first visit
+    st.session_state.pop("field", None)
 
 with st.sidebar:
-    st.header("Settings")
-    field = st.selectbox("Research field", fields)
+    st.header("Map a new topic")
+    with st.form("new_topic"):
+        new_topic = st.text_input("Topic", placeholder="e.g. wildfire, protein folding, quantum error correction")
+        category_name = st.selectbox("arXiv category (optional)", ["Any"] + list(run.CATEGORIES))
+        max_papers = st.slider(
+            "Papers to download", 200, 1500, run.DEFAULT_MAX_PAPERS, step=100,
+            help="More papers give a richer map but take longer: roughly a minute per 600 new papers.",
+        )
+        build_clicked = st.form_submit_button("Build map", type="primary")
+
+    st.header("Explore")
+    field = None
+    if built:
+        field = st.selectbox(
+            "Mapped topic", list(built), key="field",
+            format_func=lambda f: f"{built[f]['name']} ({built[f]['papers']:,} papers)",
+            on_change=lambda: st.session_state.update(gap_pick=0),  # start at gap #1 in a new topic
+        )
     show_all_names = st.toggle("Show every topic name", value=False)
     show_noise = st.toggle("Show unclustered papers", value=True)
     with st.expander("How gaps are found"):
@@ -183,12 +202,45 @@ with st.sidebar:
             "that few papers connect."
         )
 
+# Build a new topic: runs the whole pipeline here, with a progress bar.
+if build_clicked and new_topic.strip():
+    with st.status(f"Building a map for '{new_topic.strip()}'...", expanded=True) as status:
+        bar = st.progress(0.0, text="Starting...")
+        last = {"fraction": 0.0}
+
+        def show_progress(message: str, fraction: float | None = None) -> None:
+            if fraction is not None:
+                last["fraction"] = min(max(fraction, 0.0), 1.0)
+            bar.progress(last["fraction"], text=message)
+
+        try:
+            new_field = run.run_topic(
+                new_topic, run.CATEGORIES.get(category_name), max_papers, progress=show_progress
+            )
+        except run.PipelineError as error:
+            status.update(label="Couldn't build this map", state="error")
+            st.error(str(error))
+        except Exception as error:  # network problems etc.: show it rather than crash the page
+            status.update(label="Something went wrong", state="error")
+            st.error(f"Something went wrong while building the map ({type(error).__name__}: {error}).")
+        else:
+            status.update(label="Map ready!", state="complete")
+            load_topics.clear()
+            load_field.clear()
+            # The topic dropdown is already drawn, so it can't change now: hand
+            # the new topic to the next run, which selects it before drawing.
+            st.session_state["pending_field"] = new_field
+            st.rerun()
+elif build_clicked:
+    st.warning("Type a topic first.")
+
+if field is None:
+    st.info("No maps yet. Type a topic in the sidebar and click **Build map**.")
+    st.stop()
+
 papers, clusters, gaps = load_field(field)
 if clusters.empty or gaps.empty:
-    st.info(
-        f"'{field}' has no topics or gaps yet. Run `python -m pipeline.embed_cluster` "
-        f"and `python -m pipeline.gaps` with `--field \"{field}\"`."
-    )
+    st.info(f"'{built[field]['name']}' has no gaps yet. Try rebuilding it or picking another topic.")
     st.stop()
 
 labels = dict(zip(clusters["id"], clusters["label"]))

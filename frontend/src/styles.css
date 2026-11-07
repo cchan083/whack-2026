@@ -1,0 +1,197 @@
+/* Research Gap Finder styles. Colours are variables, so dark mode only
+   swaps the variables (at the bottom of this section). */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e; /* secondary text */
+  --muted: #898781;
+  --line: #e1e0d9; /* borders and dividers */
+  --accent: #2a78d6; /* buttons, links, focus */
+  --accent-ink: #ffffff; /* text on accent */
+  --gap: #1baf7a;
+  --selected-row: #eaf2fc;
+  --alert-bg: #fdecec;
+  --alert-ink: #8f1f1f;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(11, 11, 11, 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --line: #2c2c2a;
+    --accent: #3987e5;
+    --accent-ink: #ffffff;
+    --gap: #199e70;
+    --selected-row: #1d2a3a;
+    --alert-bg: #3a1a1a;
+    --alert-ink: #f5b5b5;
+    --shadow: none;
+  }
+}
+
+/* --- Base --------------------------------------------------------------- */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+h1, h2 { line-height: 1.2; margin: 0; }
+h2 { font-size: 1.1rem; }
+a { color: var(--accent); }
+
+/* Visible focus ring for keyboard users. */
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+.wrap { max-width: 1400px; margin: 0 auto; padding-inline: 20px; }
+.hint { color: var(--ink-2); font-size: 0.85rem; margin: 6px 0 0; }
+
+/* --- Header ------------------------------------------------------------- */
+
+.site-header { border-bottom: 1px solid var(--line); background: var(--surface); padding-block: 22px; }
+.site-header h1 { font-size: 1.6rem; }
+.site-header h1::before { content: "★ "; color: var(--gap); }
+.tagline { color: var(--ink-2); margin: 6px 0 0; max-width: 60ch; }
+
+main { padding-block: 20px 48px; display: grid; gap: 16px; }
+
+/* --- Cards -------------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  min-width: 0; /* lets wide tables scroll instead of stretching the page */
+}
+.card > h2 { margin-bottom: 12px; }
+details.card summary { cursor: pointer; font-weight: 600; }
+details.card[open] summary { margin-bottom: 12px; }
+
+/* --- Forms -------------------------------------------------------------- */
+
+.topic-search { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.field { display: grid; gap: 4px; }
+.field.grow { flex: 1 1 280px; }
+.full { flex-basis: 100%; }
+label { font-weight: 600; font-size: 0.9rem; }
+
+input[type="text"], select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--page);
+  border: 1px solid var(--muted);
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-height: 40px;
+  max-width: 100%;
+}
+
+button { font: inherit; cursor: pointer; }
+button.primary {
+  background: var(--accent); color: var(--accent-ink);
+  border: none; border-radius: 8px; padding: 9px 18px; min-height: 40px; font-weight: 600;
+}
+button.primary:disabled { opacity: 0.6; cursor: progress; }
+.link-button {
+  background: none; border: none; padding: 2px 4px;
+  color: var(--accent); text-decoration: underline; font-weight: 600;
+}
+
+.check { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; }
+.check input { width: 16px; height: 16px; accent-color: var(--accent); }
+
+/* --- Build progress, errors, topic chips -------------------------------- */
+
+.progress { margin-top: 14px; }
+.progress p { margin: 0 0 6px; }
+.progress-track, .score-track {
+  height: 8px; border-radius: 4px; background: var(--line); overflow: hidden;
+}
+.progress-fill { height: 100%; background: var(--accent); transition: width 0.4s ease; }
+
+.alert {
+  margin-top: 14px; padding: 10px 12px; border-radius: 8px;
+  background: var(--alert-bg); color: var(--alert-ink);
+  display: flex; gap: 12px; justify-content: space-between; align-items: center;
+}
+.alert .link-button { color: inherit; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
+.chips-label { color: var(--ink-2); font-size: 0.9rem; }
+.chip {
+  border: 1px solid var(--line); background: var(--page); color: var(--ink);
+  border-radius: 999px; padding: 4px 12px;
+}
+.chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.chip-count { opacity: 0.75; font-size: 0.85em; margin-left: 4px; }
+
+.loading, .empty { color: var(--ink-2); text-align: center; padding: 24px; }
+
+/* --- Stats row ---------------------------------------------------------- */
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 0; }
+.stats > div { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 16px; }
+.stats dt { color: var(--ink-2); font-size: 0.85rem; }
+.stats dd { margin: 2px 0 0; font-size: 1.6rem; font-weight: 600; }
+
+/* --- Map + gap panel ---------------------------------------------------- */
+
+.explore { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+
+.map-toolbar { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+.map-toolbar h2 { margin-right: auto; }
+.map { width: 100%; height: 640px; }
+
+.gap-detail { display: grid; gap: 14px; position: sticky; top: 12px; }
+.gap-detail select { width: 100%; }
+.topic-pair { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.topic-pair li { display: flex; gap: 8px; align-items: baseline; }
+.dot { width: 12px; height: 12px; border-radius: 50%; flex: none; transform: translateY(1px); }
+.score p { margin: 6px 0 0; }
+.score-fill { height: 100%; background: var(--gap); }
+
+.proposal { border-top: 1px solid var(--line); padding-top: 4px; }
+.proposal h3 { font-size: 1.05rem; margin: 10px 0 6px; }
+.proposal ul { padding-left: 20px; margin: 4px 0 10px; }
+.proposal li { margin-bottom: 4px; }
+
+/* --- Tables ------------------------------------------------------------- */
+
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--ink-2); font-size: 0.85rem; font-weight: 600; }
+tr.selected td { background: var(--selected-row); }
+.score-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mini-track {
+  display: inline-block; width: 60px; height: 6px; border-radius: 3px;
+  background: var(--line); overflow: hidden; margin-right: 8px; vertical-align: middle;
+}
+.mini-fill { display: block; height: 100%; background: var(--gap); }
+
+/* --- Small screens: stack the map and the panel ------------------------- */
+
+@media (max-width: 900px) {
+  .explore { grid-template-columns: 1fr; }
+  .gap-detail { position: static; }
+  .map { height: 460px; }
+}
