@@ -73,3 +73,29 @@ if __name__ == "__main__":
         test()
         print(f"ok  {test.__name__}")
     print(f"{len(tests)} tests passed")
+
+
+def gaps(*rows: tuple[str, float]) -> list[dict]:
+    return [{"status": status, "base_score": base} for status, base in rows]
+
+
+def test_assessment_none_when_everything_demoted() -> None:
+    result = v.assess_topic(gaps(("demoted", 0.7), ("demoted", 0.5)))
+    assert result["verdict"] == "none" and result["strong_gaps"] == 0
+    assert "2 of 2 candidate gaps were demoted" in result["message"]
+
+
+def test_assessment_none_when_promoted_gaps_are_weak() -> None:
+    result = v.assess_topic(gaps(("promoted", 0.07), ("demoted", 0.4)))
+    assert result["verdict"] == "none"
+    assert "weakly connected" in result["message"]
+
+
+def test_assessment_none_without_gaps() -> None:
+    assert v.assess_topic([])["verdict"] == "none"
+
+
+def test_assessment_limited_and_clear() -> None:
+    assert v.assess_topic(gaps(("promoted", 0.5), ("demoted", 0.5)))["verdict"] == "limited"
+    clear = v.assess_topic(gaps(("promoted", 0.5), ("neutral", 0.3), ("promoted", 0.2), ("needs_review", 0.6)))
+    assert clear["verdict"] == "clear" and clear["strong_gaps"] == 3

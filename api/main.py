@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from db import Cluster, Gap, Paper, engine, init_db
-from pipeline import run
+from pipeline import run, validation
 
 
 @asynccontextmanager
@@ -72,9 +72,18 @@ def topic_map(field: str) -> dict:
     if not clusters:
         raise HTTPException(404, f"No map for '{field}' yet.")
 
+    gap_rows = [
+        {"id": g.id, "rank": rank, "cluster_a": g.cluster_a, "cluster_b": g.cluster_b,
+         "score": g.score, "base_score": g.base_score, "literature_count": g.literature_count,
+         "status": g.status, "reasons": json.loads(g.reasons) if g.reasons else [],
+         "x": g.x, "y": g.y, "proposal": g.proposal}
+        for rank, g in enumerate(gaps, start=1)
+    ]
     return {
         "field": field,
         "name": run.display_name(field),
+        # Is this topic worth exploring? "clear", "limited" or "none", plus a message for the user.
+        "assessment": validation.assess_topic(gap_rows),
         "papers": [
             {"arxiv_id": p.arxiv_id, "title": p.title, "year": p.published.year,
              "x": p.x, "y": p.y, "cluster_id": p.cluster_id}
@@ -85,13 +94,7 @@ def topic_map(field: str) -> dict:
              "category": c.category}
             for c in clusters
         ],
-        "gaps": [
-            {"id": g.id, "rank": rank, "cluster_a": g.cluster_a, "cluster_b": g.cluster_b,
-             "score": g.score, "base_score": g.base_score, "literature_count": g.literature_count,
-             "status": g.status, "reasons": json.loads(g.reasons) if g.reasons else [],
-             "x": g.x, "y": g.y, "proposal": g.proposal}
-            for rank, g in enumerate(gaps, start=1)
-        ],
+        "gaps": gap_rows,
     }
 
 

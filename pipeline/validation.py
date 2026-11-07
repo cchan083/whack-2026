@@ -518,6 +518,51 @@ def validate_pairs(
     return df
 
 
+# --- Is this topic worth exploring? ------------------------------------------
+
+STRONG_STATUSES = frozenset({"promoted", "neutral"})  # survived validation without a penalty
+MIN_STRONG_BASE_SCORE = 0.15  # weaker map scores mean the two topics barely form a gap
+MIN_STRONG_GAPS = 3  # fewer strong gaps than this = limited opportunities
+
+
+def assess_topic(gaps: Sequence[dict]) -> dict:
+    """Overall verdict for a map, from its saved gaps (dicts with "status" and "base_score").
+
+    A gap is "strong" when validation didn't penalise it (promoted or neutral)
+    and its map score shows a real gap between two related topics.
+    verdict: "clear" (enough strong gaps), "limited" (one or two) or "none".
+    """
+    strong = [g for g in gaps
+              if g.get("status") in STRONG_STATUSES and (g.get("base_score") or 0) >= MIN_STRONG_BASE_SCORE]
+    penalised = sum(g.get("status") in ("demoted", "rejected") for g in gaps)
+    review = sum(g.get("status") == "needs_review" for g in gaps)
+    n, total = len(strong), len(gaps)
+
+    if total == 0:
+        verdict = "none"
+        message = ("No research gaps were found: the papers on this topic don't split into related "
+                   "areas with unexplored space between them. Try a broader or different topic.")
+    elif n == 0:
+        verdict = "none"
+        details = [f"{penalised} of {total} candidate gaps were demoted"] if penalised else []
+        if review:
+            details.append(f"{review} {'needs' if review == 1 else 'need'} a human to check "
+                           f"{'it' if review == 1 else 'them'}")
+        weak = total - penalised - review
+        if weak > 0:
+            details.append(f"{weak} {'is' if weak == 1 else 'are'} only weakly connected")
+        message = ("This topic doesn't look feasible for finding a research gap: no pair of topics shows a "
+                   f"strong, unexplored connection ({'; '.join(details)}). Try a broader or different topic.")
+    elif n < MIN_STRONG_GAPS:
+        verdict = "limited"
+        message = (f"Only {n} of {total} gaps {'is' if n == 1 else 'are'} promising; the rest were demoted, need "
+                   "review or are weakly connected. There may be little room to expand research here.")
+    else:
+        verdict = "clear"
+        message = f"{n} of {total} gaps are promising."
+    return {"verdict": verdict, "strong_gaps": n, "total_gaps": total, "message": message}
+
+
 def default_embedder() -> Embedder:
     """Embedding function using the pipeline's model (loaded once per process)."""
     from pipeline.embed_cluster import embedding_model  # local import: heavy, only needed here
