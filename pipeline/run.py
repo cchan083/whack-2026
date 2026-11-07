@@ -2,6 +2,8 @@
 
 Example:
     python -m pipeline.run --topic "coral reef monitoring" --max 600
+    python -m pipeline.run --recluster --field wildfire   # redo topics + gaps, no download
+    python -m pipeline.run --recluster --all
 
 Both frontends (Streamlit app.py and the FastAPI backend) call run_topic().
 A topic that was built before is not rebuilt (unless force=True).
@@ -159,13 +161,44 @@ def run_topic(
     return field
 
 
+def recluster(field: str, progress=console_progress) -> None:
+    """Redo the topics and gaps of an already-downloaded field with the current
+    code, without downloading papers again. arXiv literature counts are cached
+    in the database, so this is quick. Replaces the field's topics and gaps."""
+    with pipeline_lock(progress):
+        embed_cluster.embed_missing(field, progress=_stage(progress, 0.0, 0.1))
+        clusters = embed_cluster.map_and_cluster(field, progress=_stage(progress, 0.1, 0.5))
+        if len(clusters) < 2:
+            raise PipelineError(f"'{field}' has too few distinct topics to find gaps.")
+        gaps.find_gaps(field, max_lookups=20, progress=_stage(progress, 0.5, 1.0))
+    progress("Done!", 1.0)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build a research gap map for any topic.")
-    parser.add_argument("--topic", required=True, help='e.g. "coral reef monitoring"')
+    parser.add_argument("--topic", help='e.g. "coral reef monitoring"')
     parser.add_argument("--category", default=None, help="Optional arXiv category, e.g. cs.LG")
     parser.add_argument("--max", type=int, default=DEFAULT_MAX_PAPERS, help="Max papers to download")
     parser.add_argument("--force", action="store_true", help="Rebuild even if the topic exists")
+    parser.add_argument("--recluster", action="store_true",
+                        help="Redo topics and gaps of existing maps (no download); use with --field or --all")
+    parser.add_argument("--field", help='Existing map to recluster, e.g. "topology__cs.LG"')
+    parser.add_argument("--all", action="store_true", help="With --recluster: every built map")
     args = parser.parse_args()
+
+    if args.recluster:
+        if not (args.field or args.all):
+            parser.error("--recluster needs --field or --all")
+        fields = [t["field"] for t in list_topics() if t["clusters"] > 0] if args.all else [args.field]
+        for field in fields:
+            print(f"\n== {field}")
+            try:
+                recluster(field)
+            except PipelineError as error:
+                print(f"Couldn't recluster '{field}': {error}")
+        return
+    if not args.topic:
+        parser.error("--topic is required (or use --recluster)")
     try:
         field = run_topic(args.topic, args.category, args.max, force=args.force)
         print(f"Ready: field '{field}'")
