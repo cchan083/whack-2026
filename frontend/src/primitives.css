@@ -179,6 +179,10 @@
 }
 .switch input {
   position: absolute;
+  z-index: 1; /* on top of the drawn track so clicks hit the real checkbox */
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
   opacity: 0;
   width: 28px;
   height: 16px;

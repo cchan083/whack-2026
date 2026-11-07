@@ -25,7 +25,8 @@ const axeReport = {};
 const browser = await chromium.launch();
 
 for (const [width, height] of VIEWPORTS) {
-  const page = await browser.newPage({ viewport: { width, height } });
+  const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "no-preference" });
+  const page = await context.newPage();
   page.on("console", (m) => m.type() === "error" && problems.push(`${width}: console: ${m.text()}`));
   page.on("pageerror", (e) => problems.push(`${width}: pageerror: ${e.message}`));
 
@@ -53,7 +54,7 @@ for (const [width, height] of VIEWPORTS) {
       targets: v.nodes.slice(0, 3).map((n) => n.target.join(" ")),
     }));
   }
-  await page.close();
+  await context.close();
 }
 
 await browser.close();

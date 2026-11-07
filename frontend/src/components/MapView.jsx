@@ -1,15 +1,18 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Plotly from "plotly.js-dist-min";
-import { shortName } from "../theme.js";
-import { boundsOf, flyTo } from "../lib/mapNav.js";
+import { COLOURS, FONT_MONO, FONT_UI, shortName } from "../theme.js";
+import { boundsOf, flyTo, zoomBy } from "../lib/mapNav.js";
+import { Icon, IconButton, StarGlyph } from "./ui.jsx";
 
-// Traces are always added in the same order, so trace 5 is always the gaps.
-const GAP_TRACE = 5;
+// Traces are always in this order, so updates can target them by index.
+const T = { NOISE: 0, OTHERS: 1, A: 2, B: 3, LINK: 4, STARS: 5, RING: 6, SELECTED: 7, PAPER: 8 };
+const DIM = 0.22; // opacity of papers outside the selected pair
 
-/** Split a long title into lines for the hover box. */
-function wrap(text, width = 60) {
+/** Truncate to ~80 characters, then wrap into lines for the hover box. */
+function hoverTitle(text, max = 80, width = 46) {
+  const short = text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
   const lines = [""];
-  for (const word of text.split(" ")) {
+  for (const word of short.split(" ")) {
     const last = lines.length - 1;
     if (lines[last] && (lines[last] + " " + word).length > width) lines.push(word);
     else lines[last] = lines[last] ? `${lines[last]} ${word}` : word;
@@ -17,126 +20,366 @@ function wrap(text, width = 60) {
   return lines.join("<br>");
 }
 
-function paperTrace(papers, name, color, size, opacity, labelOf) {
+const xyc = (papers) => ({
+  x: papers.map((p) => p.x),
+  y: papers.map((p) => p.y),
+  customdata: papers.map((p) => p.hover),
+});
+
+const PAPER_HOVER =
+  "<b>%{customdata[0]}</b><br><span style='color:#a09e98'>%{customdata[1]} · %{customdata[2]}</span><extra></extra>";
+
+function paperTrace(points, { size, color, opacity, uid }) {
   return {
     type: "scattergl", // WebGL: fast with thousands of points
     mode: "markers",
-    name,
-    x: papers.map((p) => p.x),
-    y: papers.map((p) => p.y),
+    uid,
+    ...xyc(points),
     marker: { size, color, opacity },
-    customdata: papers.map((p) => [wrap(p.title), p.year, labelOf(p.cluster_id)]),
-    hovertemplate: "<b>%{customdata[0]}</b><br>%{customdata[1]} · %{customdata[2]}<extra></extra>",
+    hovertemplate: PAPER_HOVER,
   };
 }
 
-/** The interactive map: papers as dots, gaps as numbered stars. */
-export default function MapView({ data, selected, onSelectGap, showNoise, showAllNames, colours }) {
-  const container = useRef(null);
-  const lastSelection = useRef(null); // `${field}:${selected}` already flown to
+/** Everything that depends only on the topic's data (computed once per topic). */
+function prepare(data) {
+  const byId = Object.fromEntries(data.clusters.map((c) => [c.id, c]));
+  const papers = data.papers.map((p) => ({
+    ...p,
+    hover: [
+      hoverTitle(p.title),
+      p.year,
+      p.cluster_id == null ? "Unclustered" : shortName(byId[p.cluster_id]?.label),
+    ],
+  }));
+  const scores = data.gaps.map((g) => g.score);
+  const lo = Math.min(...scores);
+  const hi = Math.max(...scores);
+  return {
+    byId,
+    papers,
+    byArxiv: Object.fromEntries(papers.map((p) => [p.arxiv_id, p])),
+    noise: papers.filter((p) => p.cluster_id == null),
+    clustered: papers.filter((p) => p.cluster_id != null),
+    full: boundsOf(papers, 0.04),
+    // Star size scales with score: 9-15px.
+    starSizes: scores.map((s) => (hi > lo ? 9 + (6 * (s - lo)) / (hi - lo) : 12)),
+  };
+}
 
-  useEffect(() => {
-    const { papers, clusters, gaps } = data;
-    const byId = Object.fromEntries(clusters.map((c) => [c.id, c]));
-    const labelOf = (id) => (id == null ? "Unclustered" : byId[id]?.label ?? "");
-    const gap = gaps[selected];
-    const a = byId[gap.cluster_a];
-    const b = byId[gap.cluster_b];
+/** Per-selection pieces: who is in A, B or neither. */
+function pairOf(prep, gap) {
+  const a = prep.byId[gap.cluster_a];
+  const b = prep.byId[gap.cluster_b];
+  const inA = [], inB = [], others = [];
+  for (const p of prep.clustered) {
+    if (p.cluster_id === a.id) inA.push(p);
+    else if (p.cluster_id === b.id) inB.push(p);
+    else others.push(p);
+  }
+  return { a, b, inA, inB, others };
+}
 
-    const noise = showNoise ? papers.filter((p) => p.cluster_id == null) : [];
-    const inA = papers.filter((p) => p.cluster_id === a.id);
-    const inB = papers.filter((p) => p.cluster_id === b.id);
-    const others = papers.filter((p) => p.cluster_id != null && p.cluster_id !== a.id && p.cluster_id !== b.id);
+const LABEL_FONT = { family: FONT_UI, size: 12, color: COLOURS.ink };
 
-    const traces = [
-      paperTrace(noise, "Unclustered paper", colours.noise, 5, 0.5, labelOf),
-      paperTrace(others, "Paper in another topic", colours.papers, 5, 0.45, labelOf),
-      paperTrace(inA, `Topic A: ${shortName(a.label)}`, colours.a, 7, 0.9, labelOf),
-      paperTrace(inB, `Topic B: ${shortName(b.label)}`, colours.b, 7, 0.9, labelOf),
-      { // dotted line: topic A centre -> gap -> topic B centre
-        type: "scatter", mode: "lines", x: [a.x, gap.x, b.x], y: [a.y, gap.y, b.y],
-        line: { color: colours.ink, width: 2, dash: "dot" }, opacity: 0.6,
-        hoverinfo: "skip", showlegend: false,
-      },
-      { // the gaps, numbered by rank; the selected one is bigger
-        type: "scatter", mode: "markers+text", name: "Research gap (click one)",
-        x: gaps.map((g) => g.x), y: gaps.map((g) => g.y),
-        text: gaps.map((g) => String(g.rank)), textposition: "top center",
-        textfont: { color: colours.ink, size: 12 },
-        marker: {
-          symbol: "star", color: colours.gap,
-          size: gaps.map((_, i) => (i === selected ? 26 : 15)),
-          line: { width: 2, color: gaps.map((_, i) => (i === selected ? colours.ink : colours.ring)) },
-        },
-        hovertext: gaps.map((g) =>
-          `<b>Gap #${g.rank}</b><br>${shortName(byId[g.cluster_a].label)} ↔ ${shortName(byId[g.cluster_b].label)}` +
-          `<br>Score ${g.score.toFixed(2)}<br><i>Click to open</i>`),
-        hovertemplate: "%{hovertext}<extra></extra>",
-      },
-    ];
+function pairLabel(cluster, letter, colour, yshift = 18) {
+  return {
+    x: cluster.x, y: cluster.y, showarrow: false, yshift,
+    text: `<b>${letter}</b>  ${shortName(cluster.label)}`,
+    font: LABEL_FONT,
+    bgcolor: COLOURS.raised, bordercolor: colour, borderwidth: 1, borderpad: 5,
+  };
+}
 
-    // Topic names on the map: always for A and B, optionally for every topic.
-    const named = showAllNames ? clusters : [a, b];
-    const annotations = named.map((c) => {
-      const highlighted = c.id === a.id || c.id === b.id;
-      return {
-        x: c.x, y: c.y, text: shortName(c.label), showarrow: false,
-        font: { size: highlighted ? 13 : 10, color: highlighted ? colours.ink : colours.muted },
-        bgcolor: highlighted ? colours.ring : undefined,
-      };
+/**
+ * Topic labels: the selected pair always; with "show every topic name", other
+ * topics too, dropping any that would overlap a bigger topic's label
+ * (simple greedy pass in screen pixels, recomputed after zooming).
+ */
+function labelAnnotations(gd, prep, pair, showAll) {
+  const xa = gd?._fullLayout?.xaxis;
+  const ya = gd?._fullLayout?.yaxis;
+  if (!xa || !ya) return [pairLabel(pair.a, "A", COLOURS.a), pairLabel(pair.b, "B", COLOURS.b)];
+
+  const box = (c, text, yshift) => {
+    const w = text.length * 7 + 14;
+    const h = 24;
+    const cx = xa.l2p(c.x);
+    const cy = ya.l2p(c.y) - yshift;
+    return { x0: cx - w / 2, x1: cx + w / 2, y0: cy - h / 2, y1: cy + h / 2 };
+  };
+  const hit = (r, o) => r.x0 < o.x1 && r.x1 > o.x0 && r.y0 < o.y1 && r.y1 > o.y0;
+  const textA = `A  ${shortName(pair.a.label)}`;
+  const textB = `B  ${shortName(pair.b.label)}`;
+  // If the pair's own labels collide, put the upper one above its centre and the lower one below.
+  let shiftA = 18, shiftB = 18;
+  if (hit(box(pair.a, textA, shiftA), box(pair.b, textB, shiftB))) {
+    const aHigher = ya.l2p(pair.a.y) <= ya.l2p(pair.b.y);
+    shiftA = aHigher ? 20 : -20;
+    shiftB = aHigher ? -20 : 20;
+  }
+  const out = [pairLabel(pair.a, "A", COLOURS.a, shiftA), pairLabel(pair.b, "B", COLOURS.b, shiftB)];
+  if (!showAll) return out;
+  const boxes = [box(pair.a, textA, shiftA), box(pair.b, textB, shiftB)];
+  const overlaps = (r) => boxes.some((o) => hit(r, o));
+
+  const [px0, px1] = [0, xa._length];
+  const [py0, py1] = [0, ya._length];
+  const rest = Object.values(prep.byId)
+    .filter((c) => c.id !== pair.a.id && c.id !== pair.b.id)
+    .sort((x, y) => y.size - x.size);
+  for (const c of rest) {
+    const text = shortName(c.label);
+    const r = box(c, text, 0);
+    if (r.x1 < px0 || r.x0 > px1 || r.y1 < py0 || r.y0 > py1) continue; // off screen
+    if (overlaps(r)) continue;
+    boxes.push(r);
+    out.push({
+      x: c.x, y: c.y, showarrow: false, text,
+      font: { ...LABEL_FONT, color: COLOURS.muted },
+      bgcolor: "rgba(26,26,25,0.85)", bordercolor: COLOURS.hairline, borderwidth: 1, borderpad: 4,
     });
+  }
+  return out;
+}
 
-    // The map's x/y have no units, so hide the axes entirely.
-    const hiddenAxis = { showgrid: false, zeroline: false, showticklabels: false };
+function buildTraces(prep, gaps, selected, pair, showNoise) {
+  const gap = gaps[selected];
+  return [
+    { ...paperTrace(prep.noise, { size: 3.5, color: COLOURS.noise, opacity: DIM, uid: "noise" }), visible: showNoise },
+    paperTrace(pair.others, { size: 5.5, color: COLOURS.papers, opacity: DIM, uid: "others" }),
+    paperTrace(pair.inA, { size: 7, color: COLOURS.a, opacity: 0.95, uid: "topic-a" }),
+    paperTrace(pair.inB, { size: 7, color: COLOURS.b, opacity: 0.95, uid: "topic-b" }),
+    { // dashed link: topic A centre -> gap -> topic B centre
+      type: "scatter", mode: "lines", uid: "link",
+      x: [pair.a.x, gap.x, pair.b.x], y: [pair.a.y, gap.y, pair.b.y],
+      line: { color: COLOURS.gap, width: 1.5, dash: "dash" }, opacity: 0.85,
+      hoverinfo: "skip",
+    },
+    { // every gap, numbered by rank, sized by score
+      type: "scatter", mode: "markers+text", uid: "stars",
+      x: gaps.map((g) => g.x), y: gaps.map((g) => g.y),
+      text: gaps.map((g) => String(g.rank)), textposition: "top center",
+      textfont: { family: FONT_MONO, size: 10, color: gaps.map((_, i) => (i === selected ? "rgba(0,0,0,0)" : COLOURS.muted)) },
+      marker: { symbol: "star", color: COLOURS.gap, size: prep.starSizes, line: { width: 1, color: COLOURS.card } },
+      customdata: gaps.map((g) => [g.rank, shortName(prep.byId[g.cluster_a]?.label), shortName(prep.byId[g.cluster_b]?.label), g.score.toFixed(2)]),
+      hovertemplate: "<b>Gap #%{customdata[0]}</b><br>%{customdata[1]} ↔ %{customdata[2]}<br><span style='color:#a09e98'>Score</span> %{customdata[3]}<extra></extra>",
+    },
+    { // pulsing ring behind the selected star (animation in CSS)
+      type: "scatter", mode: "markers", uid: "selring", x: [gap.x], y: [gap.y],
+      marker: { symbol: "circle-open", size: 34, color: COLOURS.gap, line: { width: 1.5, color: COLOURS.gap } },
+      hoverinfo: "skip",
+    },
+    { // the selected star, bigger and glowing (glow in CSS)
+      type: "scatter", mode: "markers+text", uid: "selstar", x: [gap.x], y: [gap.y],
+      text: [String(gap.rank)], textposition: "top center",
+      textfont: { family: FONT_MONO, size: 12, color: COLOURS.ink },
+      marker: { symbol: "star", size: 24, color: COLOURS.gap, line: { width: 1.5, color: COLOURS.ink } },
+      hoverinfo: "skip",
+    },
+    { // paper highlighted from a reading-list card
+      type: "scatter", mode: "markers", uid: "paper-hl", x: [], y: [],
+      marker: { size: 16, color: "rgba(240,239,236,0.25)", line: { width: 2, color: COLOURS.ink } },
+      hoverinfo: "skip",
+    },
+  ];
+}
+
+/** The interactive map: papers as dots, gaps as numbered stars. */
+export default function MapView({ data, selected, onSelectGap, showNoise, showAllNames, highlightPaper, toolbar, showHint }) {
+  const container = useRef(null);
+  const plotted = useRef(null); // { field, selected } currently drawn
+  const ready = useRef(Promise.resolve());
+  const latest = useRef({});
+  const [dragmode, setDragmode] = useState("pan");
+  const [legendOpen, setLegendOpen] = useState(() => window.innerWidth >= 768);
+
+  const prep = useMemo(() => prepare(data), [data]);
+  const pair = useMemo(() => pairOf(prep, data.gaps[selected] ?? data.gaps[0]), [prep, data, selected]);
+  useEffect(() => {
+    latest.current = { prep, pair, showAllNames, onSelectGap };
+  });
+
+  // Re-place labels (after zooming, or when the toggle changes).
+  const refreshLabels = useRef(() => {});
+  refreshLabels.current = () => {
+    const gd = container.current;
+    if (!gd?._fullLayout) return;
+    const { prep: p, pair: pr, showAllNames: all } = latest.current;
+    Plotly.relayout(gd, { annotations: labelAnnotations(gd, p, pr, all) });
+  };
+
+  // 1. New topic: draw the whole figure once.
+  useEffect(() => {
+    const gd = container.current;
     const layout = {
       autosize: true,
-      margin: { l: 0, r: 0, t: 40, b: 0 },
+      margin: { l: 0, r: 0, t: 0, b: 0 },
       paper_bgcolor: "rgba(0,0,0,0)",
       plot_bgcolor: "rgba(0,0,0,0)",
-      font: { family: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: colours.ink },
-      legend: { orientation: "h", yanchor: "bottom", y: 1.0, x: 0 },
-      xaxis: hiddenAxis,
-      yaxis: { ...hiddenAxis, scaleanchor: "x" }, // keep the map's proportions
-      annotations,
-      hoverlabel: { align: "left" },
-      uirevision: data.field, // keep the user's zoom when only the selection changes
+      font: { family: FONT_UI, color: COLOURS.ink },
+      showlegend: false,
+      dragmode,
+      hovermode: "closest",
+      hoverlabel: {
+        bgcolor: COLOURS.raised, bordercolor: "#3a3a37",
+        font: { family: FONT_UI, size: 12, color: COLOURS.ink }, align: "left",
+      },
+      // The map's x/y have no units, so hide the axes entirely.
+      xaxis: { visible: false, range: prep.full.x },
+      yaxis: { visible: false, range: prep.full.y, scaleanchor: "x" }, // keep the map's proportions
+      annotations: [],
     };
+    const config = { displayModeBar: false, displaylogo: false, scrollZoom: true, responsive: true, doubleClick: false };
+    const traces = buildTraces(prep, data.gaps, selected, pair, showNoise);
+    plotted.current = { field: data.field, selected };
 
-    const config = { responsive: true, displaylogo: false, scrollZoom: true };
-    Plotly.react(container.current, traces, layout, config).then((plot) => {
-      // Fly to the selected pair whenever the selection changes (not on first load).
-      const key = `${data.field}:${selected}`;
-      const previous = lastSelection.current;
-      lastSelection.current = key;
-      if (previous && previous !== key && previous.startsWith(`${data.field}:`)) {
-        flyTo(plot, boundsOf([...inA, ...inB], 0.15), 600);
-      }
-      plot.removeAllListeners("plotly_click");
-      plot.on("plotly_click", (event) => {
-        const point = event.points.find((p) => p.curveNumber === GAP_TRACE);
-        if (point) onSelectGap(point.pointIndex);
+    let timer;
+    ready.current = Plotly.newPlot(gd, traces, layout, config).then(() => {
+      gd.removeAllListeners?.("plotly_click");
+      gd.removeAllListeners?.("plotly_relayout");
+      gd.on("plotly_click", (event) => {
+        const point = event.points.find((p) => p.curveNumber === T.STARS);
+        if (point) latest.current.onSelectGap(point.pointIndex);
       });
+      gd.on("plotly_relayout", (event) => {
+        const zoomed = Object.keys(event).some((k) => k.startsWith("xaxis.range") || k.startsWith("yaxis.range"));
+        if (!zoomed || gd.__flying) return;
+        clearTimeout(timer);
+        timer = setTimeout(() => refreshLabels.current(), 120);
+      });
+      refreshLabels.current();
     });
-  }, [data, selected, showNoise, showAllNames, colours, onSelectGap]);
+    return () => clearTimeout(timer);
+    // Only a new topic redraws everything; the effects below update in place.
+  }, [prep]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 2. Selection changed: restyle the affected traces in place, then fly to the pair.
+  useEffect(() => {
+    const gd = container.current;
+    const drawn = plotted.current;
+    if (!drawn || drawn.field !== data.field || drawn.selected === selected) return;
+    plotted.current = { field: data.field, selected };
+    const gap = data.gaps[selected];
+    ready.current = ready.current.then(async () => {
+      const others = xyc(pair.others), inA = xyc(pair.inA), inB = xyc(pair.inB);
+      await Plotly.restyle(
+        gd,
+        { x: [others.x, inA.x, inB.x], y: [others.y, inA.y, inB.y], customdata: [others.customdata, inA.customdata, inB.customdata] },
+        [T.OTHERS, T.A, T.B],
+      );
+      await Plotly.restyle(
+        gd,
+        {
+          x: [[pair.a.x, gap.x, pair.b.x], [gap.x], [gap.x]],
+          y: [[pair.a.y, gap.y, pair.b.y], [gap.y], [gap.y]],
+          text: [undefined, undefined, [String(gap.rank)]],
+        },
+        [T.LINK, T.RING, T.SELECTED],
+      );
+      await Plotly.restyle(
+        gd,
+        { "textfont.color": [data.gaps.map((_, i) => (i === selected ? "rgba(0,0,0,0)" : COLOURS.muted))] },
+        [T.STARS],
+      );
+      refreshLabels.current();
+      await flyTo(gd, boundsOf([...pair.inA, ...pair.inB, gap], 0.15), 600);
+      refreshLabels.current();
+    });
+  }, [selected, pair, data]);
+
+  // 3. Toggles and highlights: small in-place updates.
+  useEffect(() => {
+    ready.current = ready.current.then(() => Plotly.restyle(container.current, { visible: showNoise }, [T.NOISE]));
+  }, [showNoise]);
+  useEffect(() => {
+    ready.current = ready.current.then(() => refreshLabels.current());
+  }, [showAllNames]);
+  useEffect(() => {
+    const p = highlightPaper ? prep.byArxiv[highlightPaper] : null;
+    ready.current = ready.current.then(() =>
+      Plotly.restyle(container.current, { x: [p ? [p.x] : []], y: [p ? [p.y] : []] }, [T.PAPER]),
+    );
+  }, [highlightPaper, prep]);
+  useEffect(() => {
+    ready.current = ready.current.then(() => Plotly.relayout(container.current, { dragmode }));
+  }, [dragmode]);
 
   // Resize with the container (panels collapse/expand without a window resize),
   // and free Plotly's memory when the map is removed from the page.
   useEffect(() => {
     const element = container.current;
-    const observer = new ResizeObserver(() => element.data && Plotly.Plots.resize(element));
+    let frame;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => element.data && Plotly.Plots.resize(element));
+    });
     observer.observe(element);
     return () => {
+      cancelAnimationFrame(frame);
       observer.disconnect();
       Plotly.purge(element);
     };
   }, []);
 
+  const gd = () => container.current;
+  const gap = data.gaps[selected];
+
   return (
-    <div
-      ref={container}
-      className="map"
-      role="img"
-      aria-label={`Map of ${data.papers.length} papers. Numbered stars mark research gaps; the gaps are also listed in the table below.`}
-    />
+    <>
+      <div
+        ref={container}
+        className="map"
+        role="img"
+        aria-label={
+          `Map of ${data.papers.length} papers in ${data.clusters.length} topics. ` +
+          `Numbered stars mark research gaps; gap ${gap.rank} (${shortName(pair.a.label)} and ${shortName(pair.b.label)}) is selected. ` +
+          "The same gaps are listed in the Gaps panel and in Compare all gaps."
+        }
+      />
+
+      <div className="map-overlay-tl">
+        {toolbar}
+        <div className="legend float">
+          <button
+            type="button"
+            className="legend-toggle"
+            aria-expanded={legendOpen}
+            onClick={() => setLegendOpen((o) => !o)}
+          >
+            <Icon name="layers" />
+            <span>Legend</span>
+            <Icon name="chevronDown" className="legend-chevron" />
+          </button>
+          {legendOpen && (
+            <ul className="legend-items">
+              <li><span className="lg-dot lg-a" aria-hidden="true" /><b>A</b> {shortName(pair.a.label)}</li>
+              <li><span className="lg-dot lg-b" aria-hidden="true" /><b>B</b> {shortName(pair.b.label)}</li>
+              <li><StarGlyph size={12} className="lg-star" />Research gap</li>
+              <li><span className="lg-dot lg-other" aria-hidden="true" />Other papers</li>
+              {showNoise && <li><span className="lg-dot lg-noise" aria-hidden="true" />Unclustered</li>}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {showHint && (
+        <p className="map-hint float" aria-hidden="true">
+          <StarGlyph size={12} className="lg-star" /> Click a star or pick a gap
+        </p>
+      )}
+
+      <div className="map-controls float" role="toolbar" aria-label="Map view">
+        <IconButton icon="plus" label="Zoom in" onClick={() => zoomBy(gd(), 0.6)} />
+        <IconButton icon="minus" label="Zoom out" onClick={() => zoomBy(gd(), 1 / 0.6)} />
+        <IconButton icon="reset" label="Reset view" onClick={() => flyTo(gd(), prep.full, 600)} />
+        <span className="map-controls-sep" aria-hidden="true" />
+        <IconButton
+          icon={dragmode === "pan" ? "move" : "box"}
+          label={dragmode === "pan" ? "Drag mode: pan (switch to box zoom)" : "Drag mode: box zoom (switch to pan)"}
+          aria-pressed={dragmode === "zoom"}
+          onClick={() => setDragmode((m) => (m === "pan" ? "zoom" : "pan"))}
+        />
+      </div>
+    </>
   );
 }

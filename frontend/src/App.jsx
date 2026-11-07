@@ -32,6 +32,8 @@ export default function App() {
   const [compareOpen, setCompareOpen] = useState(false);
   const [detailCollapsed, setDetailCollapsed] = useState(false);
   const [panelTab, setPanelTab] = useState("detail"); // medium/narrow layouts: "gaps" | "detail"
+  const [interacted, setInteracted] = useState(false); // hide the map hint after the first selection
+  const [highlightPaper, setHighlightPaper] = useState(null); // arXiv id hovered in the reading list
 
   const mapped = topics.filter((t) => t.clusters > 0);
 
@@ -126,6 +128,11 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const selectGap = useCallback((i) => {
+    setSelected(i);
+    setInteracted(true);
+  }, []);
+
   // Keep the URL in sync: #field, plus ?gap=N when a gap other than #1 is selected.
   const selectedRank = mapData?.field === field ? mapData.gaps[selected]?.rank : null;
   useEffect(() => {
@@ -168,6 +175,7 @@ export default function App() {
       if (e.key === "j" || (idle && e.key === "ArrowDown")) moveSelection((i) => i + 1);
       else if (e.key === "k" || (idle && e.key === "ArrowUp")) moveSelection((i) => i - 1);
       else return;
+      setInteracted(true);
       e.preventDefault();
     };
     window.addEventListener("keydown", onKey);
@@ -184,10 +192,10 @@ export default function App() {
       e.stopPropagation();
       const from = Number(e.target.closest("[data-index]")?.dataset.index ?? selected);
       const next = Math.max(0, Math.min(gapCount - 1, move(from)));
-      setSelected(next);
+      selectGap(next);
       listRef.current?.querySelector(`[data-index="${next}"]`)?.focus();
     },
-    [gapCount, selected],
+    [gapCount, selected, selectGap],
   );
 
   // Keep the selected row visible.
@@ -202,7 +210,6 @@ export default function App() {
     [mapData],
   );
   const hasGaps = mapData && mapData.gaps.length > 0;
-  const selectGap = useCallback((i) => setSelected(i), []);
 
   const gapList = hasGaps && (
     <GapList
@@ -216,7 +223,13 @@ export default function App() {
     />
   );
   const gapDetail = hasGaps && (
-    <GapDetail gaps={mapData.gaps} clustersById={clustersById} selected={selected} colours={COLOURS} />
+    <GapDetail
+      gaps={mapData.gaps}
+      clustersById={clustersById}
+      selected={selected}
+      colours={COLOURS}
+      onHoverPaper={setHighlightPaper}
+    />
   );
 
   return (
@@ -272,11 +285,6 @@ export default function App() {
         <section className="map-area" aria-labelledby="map-heading">
           {mapData ? (
             <>
-              <div className="map-toolbar float">
-                <h2 id="map-heading" tabIndex={-1}>{mapData.name}</h2>
-                <Switch checked={showAllNames} onChange={setShowAllNames}>Show every topic name</Switch>
-                <Switch checked={showNoise} onChange={setShowNoise}>Show unclustered papers</Switch>
-              </div>
               {hasGaps ? (
                 <MapView
                   data={mapData}
@@ -284,11 +292,22 @@ export default function App() {
                   onSelectGap={selectGap}
                   showNoise={showNoise}
                   showAllNames={showAllNames}
-                  colours={COLOURS}
+                  highlightPaper={highlightPaper}
+                  showHint={!interacted}
+                  toolbar={
+                    <div className="map-toolbar float">
+                      <h2 id="map-heading" tabIndex={-1}>{mapData.name}</h2>
+                      <Switch checked={showAllNames} onChange={setShowAllNames}>Show every topic name</Switch>
+                      <Switch checked={showNoise} onChange={setShowNoise}>Show unclustered papers</Switch>
+                    </div>
+                  }
                 />
               ) : (
-                <p className="empty">No gaps found for this topic. Try a broader search.</p>
+                <p className="empty">
+                  <strong id="map-heading">{mapData.name}</strong>: no gaps found for this topic. Try a broader search.
+                </p>
               )}
+              {loadingMap && <Skeleton className="map-skeleton map-loading" />}
               {layout === "wide" && detailCollapsed && hasGaps && (
                 <button
                   type="button"
