@@ -3,16 +3,19 @@ import Plotly from "plotly.js-dist-min";
 import { COLOURS, FONT_MONO, FONT_UI, shortName } from "../theme.js";
 import { boundsOf, currentRanges, flyTo, zoomBy } from "../lib/mapNav.js";
 import { DOT_SCALES, MAP_STYLE, dotSizes, zoomGrowth } from "../lib/mapStyle.js";
+import { byYear, countUpTo, yearOf } from "../lib/timeline.js";
 import { Icon, IconButton, StarGlyph } from "./ui.jsx";
 
 // Traces are always in this order, so updates can target them by index.
 const T = {
   NOISE: 0, OTHERS: 1, HALO_A: 2, HALO_B: 3, A: 4, B: 5,
-  LINK: 6, STARS: 7, RING: 8, SELECTED: 9, PAPER: 10,
+  LINK: 6, STARS: 7, RING: 8, SELECTED: 9, PAPER: 10, NEW: 11,
 };
+// Traces whose papers are filtered by the timeline.
+const TIMED = [T.NOISE, T.OTHERS, T.HALO_A, T.HALO_B, T.A, T.B, T.NEW];
 // Paper traces whose marker size follows the dot-size setting and zoom.
-const SIZED = [T.NOISE, T.OTHERS, T.HALO_A, T.HALO_B, T.A, T.B];
-const sizesFor = (s) => [s.noise, s.others, s.halo, s.halo, s.pair, s.pair];
+const SIZED = [T.NOISE, T.OTHERS, T.HALO_A, T.HALO_B, T.A, T.B, T.NEW];
+const sizesFor = (s) => [s.noise, s.others, s.halo, s.halo, s.pair, s.pair, s.newcomer];
 
 /** Truncate to ~80 characters, then wrap into lines for the hover box. */
 function hoverTitle(text, max = 80, width = 46) {
@@ -51,6 +54,7 @@ function prepare(data) {
   const byId = Object.fromEntries(data.clusters.map((c) => [c.id, c]));
   const papers = data.papers.map((p) => ({
     ...p,
+    year: yearOf(p),
     hover: [
       hoverTitle(p.title),
       p.year,
@@ -64,8 +68,9 @@ function prepare(data) {
     byId,
     papers,
     byArxiv: Object.fromEntries(papers.map((p) => [p.arxiv_id, p])),
-    noise: papers.filter((p) => p.cluster_id == null),
-    clustered: papers.filter((p) => p.cluster_id != null),
+    // Sorted by year, so the timeline's "papers up to year Y" is a prefix of each list.
+    noise: byYear(papers.filter((p) => p.cluster_id == null)),
+    clustered: byYear(papers.filter((p) => p.cluster_id != null)),
     full: boundsOf(papers, 0.04),
     // Star size scales with score: 9-15px.
     starSizes: scores.map((s) => (hi > lo ? 9 + (6 * (s - lo)) / (hi - lo) : 12)),
@@ -82,7 +87,29 @@ function pairOf(prep, gap) {
     else if (p.cluster_id === b.id) inB.push(p);
     else others.push(p);
   }
-  return { a, b, inA, inB, others };
+  return { a, b, inA, inB, others }; // each stays sorted by year (prep.clustered is)
+}
+
+/** What the timeline lets through: each group cut to papers published up to `playhead`. */
+function visibleOf(prep, pair, playhead, showNoise) {
+  const upTo = (list) => list.slice(0, countUpTo(list, playhead));
+  const v = { noise: upTo(prep.noise), others: upTo(pair.others), inA: upTo(pair.inA), inB: upTo(pair.inB) };
+  // Papers published in the current year get a ring (only while scrubbing).
+  v.newcomers = playhead == null ? [] : [
+    ...(showNoise ? v.noise : []), ...v.others, ...v.inA, ...v.inB,
+  ].filter((p) => p.year === playhead);
+  return v;
+}
+
+/** One batched restyle payload for every timeline-filtered trace. */
+function timedUpdate(v) {
+  const groups = [v.noise, v.others, v.inA, v.inB, v.inA, v.inB, v.newcomers];
+  const halo = (i) => i === 2 || i === 3 || i === 6; // halos and rings have no hover
+  return {
+    x: groups.map((g) => g.map((p) => p.x)),
+    y: groups.map((g) => g.map((p) => p.y)),
+    customdata: groups.map((g, i) => (halo(i) ? [] : g.map((p) => p.hover))),
+  };
 }
 
 const LABEL_FONT = { family: FONT_UI, size: 12, color: COLOURS.ink };
@@ -148,16 +175,16 @@ function labelAnnotations(gd, prep, pair, showAll) {
   return out;
 }
 
-function buildTraces(prep, gaps, selected, pair, showNoise, sizes) {
+function buildTraces(prep, gaps, selected, pair, v, showNoise, sizes) {
   const gap = gaps[selected];
-  const { noise, others, pair: focus, halo, pairOutline } = MAP_STYLE;
+  const { noise, others, pair: focus, halo, pairOutline, newcomer } = MAP_STYLE;
   return [
-    { ...paperTrace(prep.noise, { size: sizes.noise, color: noise.color, opacity: noise.opacity, uid: "noise" }), visible: showNoise },
-    paperTrace(pair.others, { size: sizes.others, color: others.color, opacity: others.opacity, uid: "others" }),
-    paperTrace(pair.inA, { size: sizes.halo, color: COLOURS.a, opacity: halo.opacity, uid: "halo-a", halo: true }),
-    paperTrace(pair.inB, { size: sizes.halo, color: COLOURS.b, opacity: halo.opacity, uid: "halo-b", halo: true }),
-    paperTrace(pair.inA, { size: sizes.pair, color: COLOURS.a, opacity: focus.opacity, uid: "topic-a", line: pairOutline }),
-    paperTrace(pair.inB, { size: sizes.pair, color: COLOURS.b, opacity: focus.opacity, uid: "topic-b", line: pairOutline }),
+    { ...paperTrace(v.noise, { size: sizes.noise, color: noise.color, opacity: noise.opacity, uid: "noise" }), visible: showNoise },
+    paperTrace(v.others, { size: sizes.others, color: others.color, opacity: others.opacity, uid: "others" }),
+    paperTrace(v.inA, { size: sizes.halo, color: COLOURS.a, opacity: halo.opacity, uid: "halo-a", halo: true }),
+    paperTrace(v.inB, { size: sizes.halo, color: COLOURS.b, opacity: halo.opacity, uid: "halo-b", halo: true }),
+    paperTrace(v.inA, { size: sizes.pair, color: COLOURS.a, opacity: focus.opacity, uid: "topic-a", line: pairOutline }),
+    paperTrace(v.inB, { size: sizes.pair, color: COLOURS.b, opacity: focus.opacity, uid: "topic-b", line: pairOutline }),
     { // dashed link: topic A centre -> gap -> topic B centre
       type: "scatter", mode: "lines", uid: "link",
       x: [pair.a.x, gap.x, pair.b.x], y: [pair.a.y, gap.y, pair.b.y],
@@ -190,12 +217,17 @@ function buildTraces(prep, gaps, selected, pair, showNoise, sizes) {
       marker: { size: 16, color: "rgba(240,239,236,0.25)", line: { width: 2, color: COLOURS.ink } },
       hoverinfo: "skip",
     },
+    { // timeline: ring around papers published in the current year
+      ...paperTrace(v.newcomers, { size: sizes.newcomer, color: newcomer.color, opacity: 0.9, uid: "newcomers", halo: true }),
+      marker: { symbol: "circle-open", size: sizes.newcomer, color: newcomer.color, opacity: 0.9, line: { width: newcomer.width } },
+    },
   ];
 }
 
 /** The interactive map: papers as dots, gaps as numbered stars. */
 export default function MapView({
   data, selected, onSelectGap, showNoise, showAllNames, highlightPaper, toolbar, showHint, dotSize = "M",
+  playhead = null, overlay,
 }) {
   const container = useRef(null);
   const plotted = useRef(null); // { field, selected } currently drawn
@@ -207,7 +239,7 @@ export default function MapView({
   const prep = useMemo(() => prepare(data), [data]);
   const pair = useMemo(() => pairOf(prep, data.gaps[selected] ?? data.gaps[0]), [prep, data, selected]);
   useEffect(() => {
-    latest.current = { prep, pair, showAllNames, onSelectGap, dotScale: DOT_SCALES[dotSize] ?? 1 };
+    latest.current = { prep, pair, showAllNames, onSelectGap, dotScale: DOT_SCALES[dotSize] ?? 1, playhead, showNoise };
   });
 
   // Marker sizes = dot-size setting x a modest zoom growth (one batched restyle).
@@ -257,8 +289,11 @@ export default function MapView({
     const config = { displayModeBar: false, displaylogo: false, scrollZoom: true, responsive: true, doubleClick: false };
     const scale = DOT_SCALES[dotSize] ?? 1;
     appliedSize.current = scale;
-    const traces = buildTraces(prep, data.gaps, selected, pair, showNoise, dotSizes(scale));
+    const traces = buildTraces(
+      prep, data.gaps, selected, pair, visibleOf(prep, pair, playhead, showNoise), showNoise, dotSizes(scale),
+    );
     plotted.current = { field: data.field, selected };
+    drawnPlayhead.current = `${playhead}|${showNoise}`;
 
     let timer;
     ready.current = Plotly.newPlot(gd, traces, layout, config).then(() => {
@@ -291,16 +326,8 @@ export default function MapView({
     plotted.current = { field: data.field, selected };
     const gap = data.gaps[selected];
     ready.current = ready.current.then(async () => {
-      const others = xyc(pair.others), inA = xyc(pair.inA), inB = xyc(pair.inB);
-      await Plotly.restyle(
-        gd,
-        {
-          x: [others.x, inA.x, inB.x, inA.x, inB.x],
-          y: [others.y, inA.y, inB.y, inA.y, inB.y],
-          customdata: [others.customdata, [], [], inA.customdata, inB.customdata],
-        },
-        [T.OTHERS, T.HALO_A, T.HALO_B, T.A, T.B],
-      );
+      const { playhead: ph, showNoise: sn } = latest.current;
+      await Plotly.restyle(gd, timedUpdate(visibleOf(prep, pair, ph, sn)), TIMED);
       await Plotly.restyle(
         gd,
         {
@@ -320,7 +347,7 @@ export default function MapView({
       refreshLabels.current();
       await applySizes.current();
     });
-  }, [selected, pair, data]);
+  }, [selected, pair, data, prep]);
 
   // 3. Toggles and highlights: small in-place updates.
   useEffect(() => {
@@ -329,12 +356,27 @@ export default function MapView({
   useEffect(() => {
     ready.current = ready.current.then(() => refreshLabels.current());
   }, [showAllNames]);
+  // 4. Timeline: show only papers published up to the playhead (one batched restyle).
+  // Axis ranges stay fixed, so the camera never moves while scrubbing.
+  const drawnPlayhead = useRef(`${playhead}|${showNoise}`);
   useEffect(() => {
-    const p = highlightPaper ? prep.byArxiv[highlightPaper] : null;
+    const key = `${playhead}|${showNoise}`; // newcomer rings include unclustered papers only when shown
+    if (drawnPlayhead.current === key) return;
+    drawnPlayhead.current = key;
+    ready.current = ready.current.then(() => {
+      const { prep: p, pair: pr, showNoise: sn } = latest.current;
+      return Plotly.restyle(container.current, timedUpdate(visibleOf(p, pr, playhead, sn)), TIMED);
+    });
+  }, [playhead, showNoise]);
+
+  useEffect(() => {
+    const found = highlightPaper ? prep.byArxiv[highlightPaper] : null;
+    // A paper hidden by the timeline isn't highlighted.
+    const p = found && (playhead == null || found.year <= playhead) ? found : null;
     ready.current = ready.current.then(() =>
       Plotly.restyle(container.current, { x: [p ? [p.x] : []], y: [p ? [p.y] : []] }, [T.PAPER]),
     );
-  }, [highlightPaper, prep]);
+  }, [highlightPaper, prep, playhead]);
   useEffect(() => {
     ready.current = ready.current.then(() => Plotly.relayout(container.current, { dragmode }));
   }, [dragmode]);
@@ -371,7 +413,10 @@ export default function MapView({
         aria-label={
           `Map of ${data.papers.length} papers in ${data.clusters.length} topics. ` +
           `Numbered stars mark research gaps; gap ${gap.rank} (${shortName(pair.a.label)} and ${shortName(pair.b.label)}) is selected. ` +
-          "The same gaps are listed in the Gaps panel and in Compare all gaps."
+          "The same gaps are listed in the Gaps panel and in Compare all gaps. " +
+          (playhead == null
+            ? "The timeline below the map can show how the map grew year by year."
+            : `Timeline: showing only papers published up to ${playhead}.`)
         }
       />
 
@@ -418,6 +463,7 @@ export default function MapView({
           onClick={() => setDragmode((m) => (m === "pan" ? "zoom" : "pan"))}
         />
       </div>
+      {overlay}
     </>
   );
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildTopic, getCategories, getJob, getTopicMap, getTopics } from "./api.js";
-import { COLOURS, prefersReducedMotion } from "./theme.js";
+import { COLOURS, prefersReducedMotion, shortName } from "./theme.js";
 import { readHash, writeHash } from "./lib/hash.js";
 import { isTypingTarget, useLayout, useMediaQuery } from "./lib/hooks.js";
 import TopicSearch from "./components/TopicSearch.jsx";
@@ -12,9 +12,10 @@ import GapDetail from "./components/GapDetail.jsx";
 import GapTable from "./components/GapTable.jsx";
 import VerdictNotice from "./components/VerdictNotice.jsx";
 import DotSizeControl from "./components/DotSizeControl.jsx";
+import Timeline from "./components/Timeline.jsx";
 import { DEFAULT_DOT_SIZE, DOT_SCALES } from "./lib/mapStyle.js";
 import { readPref, writePref } from "./lib/prefs.js";
-import { Dialog, IconButton, Skeleton, StarGlyph, Switch } from "./components/ui.jsx";
+import { Dialog, Icon, IconButton, Skeleton, StarGlyph, Switch } from "./components/ui.jsx";
 
 export default function App() {
   const layout = useLayout();
@@ -29,6 +30,8 @@ export default function App() {
   const [loadingMap, setLoadingMap] = useState(false);
   const [selected, setSelected] = useState(0); // index of the selected gap (shared by map, list, table)
   const pendingGapRank = useRef(readHash().gapRank); // ?gap=N from the URL, applied once the map loads
+  const pendingYear = useRef(readHash().year); // ?year=Y from the URL, applied once the map loads
+  const [playhead, setPlayhead] = useState(null); // timeline year, or null = all time
   const listRef = useRef(null);
   const [showNoise, setShowNoise] = useState(true);
   const [showAllNames, setShowAllNames] = useState(false);
@@ -79,6 +82,11 @@ export default function App() {
         setMapData(data);
         const fromUrl = data.gaps.findIndex((g) => g.rank === pendingGapRank.current);
         pendingGapRank.current = null;
+        // New topic: the timeline starts at "All time" unless the URL asks for a year in range.
+        const years = data.papers.map((p) => p.year).filter(Number.isFinite);
+        const y = pendingYear.current;
+        pendingYear.current = null;
+        setPlayhead(y != null && y >= Math.min(...years) && y < Math.max(...years) ? y : null);
         setSelected(fromUrl >= 0 ? fromUrl : 0);
       })
       .catch((e) => !cancelled && setError(e.message))
@@ -151,11 +159,12 @@ export default function App() {
     setInteracted(true);
   }, []);
 
-  // Keep the URL in sync: #field, plus ?gap=N when a gap other than #1 is selected.
+  // Keep the URL in sync: #field, plus ?gap=N (not #1) and &year=Y (timeline position).
   const selectedRank = mapData?.field === field ? mapData.gaps[selected]?.rank : null;
+  const urlYear = mapData?.field === field ? playhead : null;
   useEffect(() => {
-    if (field) writeHash(field, selectedRank);
-  }, [field, selectedRank]);
+    if (field) writeHash(field, selectedRank, urlYear);
+  }, [field, selectedRank, urlYear]);
 
   // Follow manual URL edits and back/forward.
   const latest = useRef({ field, mapData });
@@ -164,13 +173,15 @@ export default function App() {
   });
   useEffect(() => {
     const onHash = () => {
-      const { field: f, gapRank } = readHash();
+      const { field: f, gapRank, year } = readHash();
       if (!f) return;
       if (f !== latest.current.field) {
         pendingGapRank.current = gapRank;
+        pendingYear.current = year;
         setField(f);
         return;
       }
+      setPlayhead(year);
       const i = latest.current.mapData?.gaps.findIndex((g) => g.rank === (gapRank ?? 1)) ?? -1;
       if (i >= 0) setSelected(i);
     };
@@ -243,18 +254,31 @@ export default function App() {
   );
   const hasGaps = mapData && mapData.gaps.length > 0;
 
+  const openCompare = useCallback(() => setCompareOpen(true), []);
+  const assessment = mapData?.assessment;
+  const listNotice = useMemo(() => <VerdictNotice assessment={assessment} variant="inline" />, [assessment]);
   const gapList = hasGaps && (
     <GapList
       gaps={mapData.gaps}
       clustersById={clustersById}
       selected={selected}
       onSelect={selectGap}
-      onCompare={() => setCompareOpen(true)}
+      onCompare={openCompare}
       listRef={listRef}
       onKeyDown={onListKeyDown}
-      notice={<VerdictNotice assessment={mapData.assessment} variant="inline" />}
+      notice={listNotice}
     />
   );
+  // The selected gap's two topics, for the timeline's stacked bars.
+  const selectedGap = hasGaps ? mapData.gaps[selected] : null;
+  const pairIds = useMemo(
+    () => (selectedGap ? [selectedGap.cluster_a, selectedGap.cluster_b] : null),
+    [selectedGap],
+  );
+  const pairNames = selectedGap
+    ? `Topic A (${shortName(clustersById[selectedGap.cluster_a]?.label)}), Topic B (${shortName(clustersById[selectedGap.cluster_b]?.label)}), other topics and unclustered papers`
+    : null;
+
   const gapDetail = hasGaps && (
     <GapDetail
       gaps={mapData.gaps}
@@ -262,6 +286,8 @@ export default function App() {
       selected={selected}
       colours={COLOURS}
       onHoverPaper={setHighlightPaper}
+      playhead={playhead}
+      papers={mapData.papers}
     />
   );
 
@@ -270,7 +296,7 @@ export default function App() {
       <a className="skip-link" href="#map-heading">Skip to map</a>
       <header className="topbar">
         <h1 className="wordmark">Research Gap Finder</h1>
-        <div className="island floating-surface" ref={islandRef}>
+        <div className={`island floating-surface ${job ? "is-building" : ""}`} ref={islandRef}>
           <StarGlyph size={14} className="island-star" />
           <TopicSwitcher
             topics={mapped}
@@ -292,7 +318,7 @@ export default function App() {
           />
         </div>
         <div className="topbar-stats">
-          {layout === "wide" && <StatPills data={mapData} loading={loadingMap} variant="text" />}
+          {layout === "wide" && <StatPills data={mapData} loading={loadingMap} variant="text" playhead={playhead} />}
         </div>
       </header>
 
@@ -331,7 +357,25 @@ export default function App() {
                       <Switch checked={showAllNames} onChange={setShowAllNames}>Show every topic name</Switch>
                       <Switch checked={showNoise} onChange={setShowNoise}>Show unclustered papers</Switch>
                       <DotSizeControl value={dotSize} onChange={setDotSize} />
+                      {playhead != null && (
+                        <span className="year-chip">
+                          Showing papers up to <span className="num">{playhead}</span>
+                          <button type="button" aria-label="Show all years" onClick={() => setPlayhead(null)}>
+                            <Icon name="close" size={12} />
+                          </button>
+                        </span>
+                      )}
                     </div>
+                  }
+                  playhead={playhead}
+                  overlay={
+                    <Timeline
+                      papers={mapData.papers}
+                      pairIds={pairIds}
+                      pairNames={pairNames}
+                      playhead={playhead}
+                      onChange={setPlayhead}
+                    />
                   }
                 />
               ) : (
@@ -404,7 +448,7 @@ export default function App() {
               ))}
             </div>
             <div id="side-tabpanel" role="tabpanel" aria-labelledby={`tab-${panelTab}`} className="side-content">
-              <StatPills data={mapData} loading={loadingMap} />
+              <StatPills data={mapData} loading={loadingMap} playhead={playhead} />
               {panelTab === "gaps" ? gapList : gapDetail}
             </div>
           </aside>

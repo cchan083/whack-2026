@@ -1,9 +1,34 @@
+import { memo, useEffect, useMemo, useRef } from "react";
 import Markdown from "react-markdown";
 
-// Open paper links in a new tab so the map stays open.
-const markdownParts = {
-  a: ({ node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
-};
+const arxivIdOf = (href = "") => href.match(/arxiv\.org\/abs\/([^?#]+)/)?.[1] ?? null;
+
+/**
+ * Paper links open in a new tab (so the map stays open), show the paper's year,
+ * highlight the paper's dot on the map on hover/focus, and are dimmed when the
+ * timeline is set to a year before the paper was published.
+ */
+function paperLinkParts(yearOf, onHoverPaper) {
+  return {
+    a: ({ node, children, ...props }) => {
+      const id = arxivIdOf(props.href);
+      const year = id ? yearOf[id] : undefined;
+      const hl = id && onHoverPaper ? { onMouseEnter: () => onHoverPaper(id), onMouseLeave: () => onHoverPaper(null),
+        onFocus: () => onHoverPaper(id), onBlur: () => onHoverPaper(null) } : {};
+      return (
+        <span className="paper-link" data-year={year ?? ""}>
+          <a {...props} {...hl} target="_blank" rel="noreferrer">{children}</a>
+          {year != null && (
+            <span className="year-tag num">
+              {year}
+              <span className="visually-hidden later-note" hidden> (published after the timeline year)</span>
+            </span>
+          )}
+        </span>
+      );
+    },
+  };
+}
 
 const CATEGORY_NAMES = {
   Problem_Domain: "problem domain",
@@ -32,8 +57,21 @@ function TopicLine({ name, cluster, colour }) {
 }
 
 /** Side panel: gap picker, the two topics, score, why it ranks here, and the dissertation idea. */
-export default function GapDetail({ gaps, clustersById, selected, colours }) {
+export default function GapDetail({ gaps, clustersById, selected, colours, onHoverPaper, playhead = null, papers = [] }) {
   const gap = gaps[selected];
+  const yearOf = useMemo(() => Object.fromEntries(papers.map((p) => [p.arxiv_id, p.year])), [papers]);
+  const parts = useMemo(() => paperLinkParts(yearOf, onHoverPaper), [yearOf, onHoverPaper]);
+  const proposalRef = useRef(null);
+  // Dim papers published after the timeline year. Done on the DOM so scrubbing
+  // doesn't re-parse the proposal's Markdown on every year change.
+  useEffect(() => {
+    proposalRef.current?.querySelectorAll(".paper-link").forEach((el) => {
+      const later = playhead != null && el.dataset.year !== "" && Number(el.dataset.year) > playhead;
+      el.classList.toggle("is-later", later);
+      const note = el.querySelector(".later-note");
+      if (note) note.hidden = !later;
+    });
+  }, [playhead, gap, parts]);
   const bestScore = Math.max(...gaps.map((g) => g.score), 1e-9); // bars are relative to the best gap
 
   return (
@@ -72,9 +110,14 @@ export default function GapDetail({ gaps, clustersById, selected, colours }) {
         </details>
       )}
 
-      <div className="proposal" aria-live="polite">
-        <Markdown components={markdownParts}>{gap.proposal || "_No proposal written yet._"}</Markdown>
+      <div className="proposal" aria-live="polite" ref={proposalRef}>
+        <ProposalText text={gap.proposal || "_No proposal written yet._"} parts={parts} />
       </div>
     </section>
   );
 }
+
+/** Parsed only when the text or link renderer changes (not on every timeline step). */
+const ProposalText = memo(function ProposalText({ text, parts }) {
+  return <Markdown components={parts}>{text}</Markdown>;
+});
