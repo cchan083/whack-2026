@@ -9,12 +9,17 @@ not the 2D map: UMAP keeps nearby papers together, but distances between
 faraway clusters on the map don't mean much.
 
 Steps:
-1. Neighbours: link each cluster to its most similar clusters (cosine
-   similarity of their average embeddings).
+1. Neighbours: link two clusters when each is among the other's most similar
+   clusters (cosine similarity of their average embeddings). Requiring it both
+   ways stops an outlier topic being paired with whatever is least unrelated.
 2. Emptiness: walk along the path between the two clusters' average embeddings,
-   find the spot with the fewest papers nearby, and compare it with how crowded
-   it is around a typical clustered paper.
-   1.0 = no papers at all there, 0.0 = as crowded as inside a cluster.
+   find the spot with the fewest papers nearby, and compare it with how many
+   papers sit that close to the two clusters' own centres. "Nearby" means as
+   close as a typical member is to its own cluster centre.
+   1.0 = no papers at all there, 0.0 = as crowded as at the clusters' centres.
+   (Comparing path points with centres, both averages of many papers, keeps the
+   comparison fair: in 384 dimensions an average sits closer to everything
+   than any single paper does.)
 3. Relatedness: cosine similarity of the two clusters' average embeddings.
 4. Base score = relatedness x emptiness.
 5. Validation (pipeline/validation.py): re-rank so each gap pairs one method
@@ -38,8 +43,8 @@ import llm
 from db import Cluster, Gap, Paper, engine, init_db
 from pipeline import console_progress, validation
 
-NEIGHBOURS_PER_TOPIC = 5  # each topic is paired with its 5 most similar topics
-CROWDING_K = 10  # "nearby" = closer than a typical paper's 10th-nearest neighbour
+NEIGHBOURS_PER_TOPIC = 5  # pair topics that are in each other's 5 most similar topics
+NEARBY_QUANTILE = 0.5  # "nearby" = as close as the median member is to its cluster centre
 SAMPLES_ALONG_LINE = 21  # points checked between two cluster centres
 MAX_GAPS_PER_CLUSTER = 3  # keeps the gap list varied
 
@@ -61,7 +66,7 @@ def candidate_pairs(
     cluster_ids: list[int],
     centres_2d: np.ndarray,
     neighbours: int = NEIGHBOURS_PER_TOPIC,
-    crowding_k: int = CROWDING_K,
+    nearby_quantile: float = NEARBY_QUANTILE,
 ) -> list[validation.CandidatePair]:
     """Steps 1-4 for every linked pair of clusters (no database needed).
 
@@ -74,42 +79,33 @@ def candidate_pairs(
     if len(cluster_ids) < 2 or clustered.sum() < 2:
         return []
 
-    # "Nearby" radius, adapted to this map: the typical distance (1 - cosine)
-    # from a clustered paper to its k-th nearest neighbour.
-    k = min(crowding_k, len(units) - 1)
-    sims = units[clustered] @ units.T
-    kth_sim = -np.partition(-sims, k, axis=1)[:, k]  # index 0 is the paper itself
-    min_sim = 1 - float(np.median(1 - kth_sim))
-
-    def papers_near(points: np.ndarray) -> np.ndarray:
-        return ((points @ units.T) >= min_sim).sum(axis=1)
-
-    # How crowded it is around a typical clustered paper: our "full" level.
-    typical_crowding = max(float(np.median((sims >= min_sim).sum(axis=1))), 1.0)
-
-    # Average embedding direction of each cluster.
+    # Average embedding direction of each cluster, and how tightly its papers sit
+    # around it (cosine of a typical member to the centre).
     topic = _unit(np.array([units[cluster_of == cid].mean(axis=0) for cid in cluster_ids]))
+    tightness = np.array([
+        np.quantile(units[cluster_of == cid] @ topic[k], nearby_quantile) for k, cid in enumerate(cluster_ids)
+    ])
     similarity = topic @ topic.T
 
-    # Step 1: link each cluster to its most similar clusters.
+    # Step 1: link clusters that are in each other's most similar clusters.
     if len(cluster_ids) <= 3:
         links = set(combinations(range(len(cluster_ids)), 2))  # too few to choose: link them all
     else:
-        links = set()
         np.fill_diagonal(similarity, -np.inf)
-        for i in range(len(cluster_ids)):
-            for j in np.argsort(similarity[i])[::-1][:neighbours]:
-                links.add((min(i, int(j)), max(i, int(j))))
+        nearest = [set(np.argsort(similarity[i])[::-1][:neighbours].tolist()) for i in range(len(cluster_ids))]
+        links = {(i, j) for i in range(len(cluster_ids)) for j in nearest[i] if i < j and i in nearest[j]}
 
     t = np.linspace(0, 1, SAMPLES_ALONG_LINE)
     middle = t[(t >= 0.2) & (t <= 0.8)]  # skip the ends, which sit inside the clusters
     candidates = []
     for i, j in sorted(links):
         # Step 2: emptiest spot on the path between the two average embeddings.
+        min_sim = min(tightness[i], tightness[j])
         path = _unit((1 - middle)[:, None] * topic[i] + middle[:, None] * topic[j])
-        crowding = papers_near(path)
+        crowding = ((path @ units.T) >= min_sim).sum(axis=1)
+        at_centres = ((topic[[i, j]] @ units.T) >= min_sim).sum(axis=1).mean()
         spot = int(np.argmin(crowding))
-        emptiness = 1 - min(crowding[spot] / typical_crowding, 1)
+        emptiness = 1 - min(crowding[spot] / max(at_centres, 1.0), 1)
 
         # Steps 3 and 4.
         relatedness = float(topic[i] @ topic[j])
