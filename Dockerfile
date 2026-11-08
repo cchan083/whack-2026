@@ -1,9 +1,9 @@
-# Research Gap Finder: one container with the FastAPI backend and the built
+# eXpand: one container with the FastAPI backend and the built
 # React app. Made for Hugging Face Spaces (Docker), which expects port 7860.
 #
 # Build and run locally (needs Docker):
-#   docker build -t research-gap-finder .
-#   docker run -p 7860:7860 -e DATABASE_URL="postgresql://..." research-gap-finder
+#   docker build -t expand .
+#   docker run -p 7860:7860 -e DATABASE_URL="postgresql://..." expand
 # then open http://localhost:7860
 
 # --- Stage 1: build the React frontend ---------------------------------------

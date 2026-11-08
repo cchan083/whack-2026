@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Research Gap Finder API", lifespan=lifespan)
+app = FastAPI(title="eXpand API", lifespan=lifespan)
 
 # Websites allowed to call this API from a browser: the Vite dev server and
 # the GitHub Pages site by default. Override with ALLOWED_ORIGINS (comma-separated)

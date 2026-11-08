@@ -295,7 +295,9 @@ export default function App() {
     <div className="app">
       <a className="skip-link" href="#map-heading">Skip to map</a>
       <header className="topbar">
-        <h1 className="wordmark">Research Gap Finder</h1>
+        <h1 className="wordmark" aria-label="eXpand">
+          <span aria-hidden="true">e<span className="wordmark-x">X</span>pand</span>
+        </h1>
         <div className={`island floating-surface ${job ? "is-building" : ""}`} ref={islandRef}>
           <StarGlyph size={14} className="island-star" />
           <TopicSwitcher

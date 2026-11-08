@@ -275,7 +275,7 @@ class ArxivLiteratureCounter:
         """One API request (with polite spacing and retries). Returns the response text or None."""
         # max_results=1: we only need the total, but arXiv answers max_results=0 with a server error.
         url = f"{self.API_URL}?{urllib.parse.urlencode({'search_query': query, 'max_results': 1})}"
-        request = urllib.request.Request(url, headers={"User-Agent": "research-gap-finder/0.1"})
+        request = urllib.request.Request(url, headers={"User-Agent": "expand/0.1"})
         for attempt in range(len(self.RETRY_WAITS) + 1):
             wait = self.delay_seconds - (time.monotonic() - self._last_request)
             if wait > 0:

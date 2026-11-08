@@ -1,4 +1,4 @@
-"""Research Gap Finder: Streamlit + Plotly UI.
+"""eXpand: Streamlit + Plotly UI.
 
 Run with:
     streamlit run app.py
@@ -19,7 +19,7 @@ from sqlmodel import Session, select
 from db import Cluster, Gap, Paper, engine
 from pipeline import run
 
-st.set_page_config(page_title="Research Gap Finder", layout="wide")
+st.set_page_config(page_title="eXpand", layout="wide")
 
 # Colours for light and dark mode. Only the two selected topics and the gaps
 # get strong colours; everything else stays grey so the gaps stand out.
@@ -157,7 +157,7 @@ def on_map_click() -> None:
 theme = getattr(getattr(st.context, "theme", None), "type", None) or "light"
 colours = PALETTES.get(theme, PALETTES["light"])
 
-st.title("Research Gap Finder")
+st.title("eXpand")
 st.caption(
     "Every dot is a research paper; similar papers sit close together. "
     "Stars mark unexplored territory between related topics: possible dissertation ideas."

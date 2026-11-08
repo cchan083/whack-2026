@@ -1,6 +1,6 @@
-# How Research Gap Finder works
+# How eXpand works
 
-Research Gap Finder takes any research topic, downloads the matching papers from
+eXpand takes any research topic, downloads the matching papers from
 arXiv, groups them into sub-topics, and looks for **gaps**: pairs of closely
 related sub-topics that few papers connect. Each gap comes with a suggested
 dissertation idea and a list of papers to start reading.

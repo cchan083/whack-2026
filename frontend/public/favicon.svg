@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- eXpand tab icon: grey "e" and a bold red "X" on the app's dark background. -->
+  <rect width="64" height="64" rx="14" fill="#121211"/>
+  <text x="17" y="47" text-anchor="middle" fill="#c3c2b7"
+        font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="40" font-weight="800">e</text>
+  <path d="M33 16 L57 48 M57 16 L33 48" stroke="#ff3b30" stroke-width="9" stroke-linecap="round"/>
+</svg>

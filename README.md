@@ -1,6 +1,6 @@
 ---
 # Settings for Hugging Face Spaces (ignored by GitHub, which shows them as a small table).
-title: Research Gap Finder
+title: eXpand
 emoji: 🗺️
 colorFrom: green
 colorTo: blue
@@ -9,7 +9,7 @@ app_port: 7860
 pinned: false
 ---
 
-# Research Gap Finder
+# eXpand
 
 Map any research field from arXiv, group its papers into topics, and find the
 gaps between related topics that few papers connect: dissertation ideas for students.

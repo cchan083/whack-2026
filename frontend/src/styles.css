@@ -1,4 +1,4 @@
-/* Research Gap Finder: app styles. Tokens in tokens.css, primitives in primitives.css. */
+/* eXpand: app styles. Tokens in tokens.css, primitives in primitives.css. */
 
 /* --- Base ------------------------------------------------------------------- */
 
@@ -516,10 +516,11 @@ th[aria-sort="none"] .sort-glyph { opacity: 0.5; }
 .topbar > * { pointer-events: auto; }
 .wordmark {
   justify-self: start;
-  font-size: var(--fs-base); font-weight: 650; letter-spacing: -0.01em; white-space: nowrap;
+  font-size: 1.25rem; font-weight: 750; letter-spacing: -0.03em; white-space: nowrap;
   color: var(--text-2);
   pointer-events: none;
 }
+.wordmark-x { color: var(--brand-x); font-weight: 850; }
 .topbar-stats { justify-self: end; min-width: 0; }
 
 .island {
