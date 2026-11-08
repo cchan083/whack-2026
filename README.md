@@ -13,7 +13,7 @@ pinned: false
 
 **Find the unexplored space between research topics.**
 
-Type any research topic. eXpand downloads up to 600 matching papers from arXiv,
+Type any research topic. eXpand downloads up to 1500 matching papers from arXiv,
 maps them by meaning, groups them into sub-topics, and finds **gaps**: pairs of
 closely related sub-topics with almost no papers between them. Each gap is
 checked against the wider arXiv literature, ranked by how feasible a project it
