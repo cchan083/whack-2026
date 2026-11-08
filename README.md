@@ -11,89 +11,76 @@ pinned: false
 
 # eXpand
 
-Map any research field from arXiv, group its papers into topics, and find the
-gaps between related topics that few papers connect: dissertation ideas for students.
+**Find the unexplored space between research topics.**
 
-## Setup (once)
+Type any research topic. eXpand downloads up to 600 matching papers from arXiv,
+maps them by meaning, groups them into sub-topics, and finds **gaps**: pairs of
+closely related sub-topics with almost no papers between them. Each gap is
+checked against the wider arXiv literature, ranked by how feasible a project it
+would make, and turned into a dissertation idea with real papers to start from.
 
-1. Python 3.13: `python -m venv .venv`, then `.venv\Scripts\activate` and `pip install -r requirements.txt`
-2. Node.js LTS (for the React frontend): then `cd frontend` and `npm install`
-3. Copy `.env.example` to `.env` and set `DATABASE_URL` to the Supabase **Session pooler** URI
-   (host ends in `pooler.supabase.com`; the direct connection needs IPv6).
+- **Live app:** https://gap-finder.kindbeach-9a97b012.germanywestcentral.azurecontainerapps.io
+- **How it works, demo script, pitch and judge Q&A:** [explained.md](explained.md)
 
-## Run the app
+## Run it locally
 
-**React + FastAPI (main app):**
+You need Python 3.13, Node.js 22, and a Supabase Postgres database.
 
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+cd frontend; npm install; cd ..
+copy .env.example .env      # then set DATABASE_URL to the Supabase "Session pooler" URI
 ```
-uvicorn api.main:app --reload --port 8000     # backend, API docs at http://localhost:8000/docs
-cd frontend; npm run dev                       # frontend at http://localhost:5173
-```
 
-For a demo, build the frontend once (`npm run build` in `frontend/`) and run only
-the backend: it then serves the app at http://localhost:8000.
+| Command | What you get |
+|---|---|
+| `uvicorn api.main:app --reload --port 8000` | Backend, with API docs at http://localhost:8000/docs |
+| `cd frontend; npm run dev` | The app at **http://localhost:5173**, reloading as you edit |
+| `cd frontend; npm run build` | A built copy, which the backend then serves at http://localhost:8000 |
+| `streamlit run app.py` | A simpler single-file version of the app |
+| `pytest tests` | 14 tests. They need no database or network |
+| `python -m pipeline.run --topic "wildfire"` | Build a map from the command line |
+| `python -m pipeline.run --recluster --all` | Redo every map's topics and gaps with the current code, without downloading again |
 
-**Streamlit (quick alternative):** `streamlit run app.py`
+A new topic takes 2–3 minutes to build. Only one topic is built at a time.
 
-Both let you type any topic and build its map (about 2 minutes for 600 papers).
+## Deployment (CI/CD)
 
-## Deploy to Hugging Face Spaces (Docker)
+On every push to `main`, `.github/workflows/build-image.yml` runs three steps:
 
-The `Dockerfile` builds one container with the backend and the React app, on port 7860.
+1. **Test:** `pytest` and the frontend lint. A failure stops everything.
+2. **Build:** the Docker image (React app + FastAPI), published to `ghcr.io/cchan083/whack-2026`.
+3. **Deploy:** points Azure Container Apps at the new image, then checks `/api/health`.
 
-1. On huggingface.co: **New Space** → SDK **Docker** → **Blank** → hardware **CPU basic (free)**.
-2. In the Space: **Settings → Variables and secrets → New secret**: `DATABASE_URL` = the Session pooler URI.
-3. Get the code onto the Space, either:
-   - **Automatically (recommended):** in GitHub → **Settings → Secrets and variables → Actions**, add
-     variable `HF_SPACE` = `your-hf-username/your-space-name` and secret `HF_TOKEN` = a Hugging Face
-     access token with *write* permission. Every push to `main` then deploys
-     (`.github/workflows/deploy-huggingface.yml`).
-   - **Manually:** `git remote add hf https://huggingface.co/spaces/your-hf-username/your-space-name`
-     then `git push hf main` (use the access token as the password).
-4. The first build takes about 5–10 minutes. The app is then at
-   `https://your-hf-username-your-space-name.hf.space` (API docs at `/docs`).
+Pull requests run only the test step.
 
-Free Spaces sleep after about 48 hours without visitors and take about 30 seconds to wake.
-Build jobs are tracked in memory, so a restart forgets builds in progress (finished maps are safe in the database).
+**One-time setup for the deploy step:** in GitHub, go to **Settings → Secrets and variables → Actions** and add:
+- the secret `AZURE_CREDENTIALS`, the JSON from `az ad sp create-for-rbac --name gap-finder-deploy --role contributor --scopes <resource group id> --json-auth`;
+- the variables `AZURE_RESOURCE_GROUP` = `gap-finder-rg` and `AZURE_CONTAINER_APP` = `gap-finder`.
 
-The Space serves the full app on its own. To also put the frontend on GitHub Pages, see below.
+Until these are set, the deploy step is skipped.
 
-## Frontend on GitHub Pages
+**Azure settings:** the app runs with 1 CPU and 2 GiB of memory. `DATABASE_URL` is stored as a secret.
+- **Exactly one replica:** keep max replicas at 1. Build progress is kept in memory, so it must stay in one process.
+- **Sleeps when idle:** min replicas is 0, so the app turns off when unused and takes about 30 seconds to wake.
 
-`.github/workflows/deploy-pages.yml` builds the React app and publishes it to
-`https://cchan083.github.io/whack-2026/`, talking to the backend on Hugging Face.
-
-1. Deploy the backend to Hugging Face first (above).
-2. GitHub → **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-3. GitHub → **Settings → Secrets and variables → Actions → Variables**: add `API_URL` =
-   the Space address, e.g. `https://your-hf-username-your-space-name.hf.space`.
-4. Run the workflow from the **Actions** tab (it also runs on every push that changes `frontend/`).
-
-The repo must be public for Pages on a free GitHub account. The backend already allows requests
-from `https://cchan083.github.io`; change the list with the `ALLOWED_ORIGINS` variable on the Space.
-
-## Pipeline from the command line
-
-```
-python -m pipeline.run --topic "wildfire" --max 600        # everything for one topic
-python -m pipeline.ingest --field ml-climate --query "cat:cs.LG AND abs:climate" --max 3000
-python -m pipeline.embed_cluster --field ml-climate
-python -m pipeline.gaps --field ml-climate
-```
+**Other hosting** (optional, off by default):
+- `deploy-huggingface.yml` pushes to a Hugging Face Space. Turn it on with the variable `HF_SPACE` and the secret `HF_TOKEN`.
+- `deploy-pages.yml` publishes only the frontend to GitHub Pages. Turn it on with the variable `API_URL`.
 
 ## Code map
 
 | Path | Job |
 |---|---|
-| `db.py` | Database connection and tables (Paper, Cluster, Gap) |
-| `pipeline/ingest.py` | Download papers from arXiv |
-| `pipeline/embed_cluster.py` | Embeddings, 2D map (UMAP), topics (HDBSCAN) |
-| `pipeline/gaps.py` | Score gaps between neighbouring topics |
-| `pipeline/validation.py` | Re-rank gaps: method + problem pairing, literature "Goldilocks zone" (arXiv counts), funding relevance |
-| `tests/` | Tests for the validation layer: `python -m tests.test_validation` |
-| `pipeline/run.py` | Run all steps for any typed topic |
-| `llm.py` | Topic labels and gap proposals (keywords + templates, no AI API needed) |
-| `api/main.py` | FastAPI backend for the React app |
-| `frontend/` | React + CSS frontend (Vite) |
-| `app.py` | Streamlit frontend |
-| `Dockerfile`, `.github/workflows/` | Hosting: backend on Hugging Face Spaces, frontend on GitHub Pages |
+| `pipeline/run.py` | Runs every step for a typed topic, one build at a time (Postgres lock) |
+| `pipeline/ingest.py` | Searches arXiv and saves the papers |
+| `pipeline/embed_cluster.py` | Embeddings (MiniLM), 2D map and 5D clustering (UMAP), topics (HDBSCAN) |
+| `pipeline/gaps.py` | Finds and scores gaps between neighbouring topics |
+| `pipeline/validation.py` | Re-ranks gaps: method × problem, arXiv literature count, funding relevance |
+| `llm.py` | Topic names (class-based TF-IDF) and proposals (templates). No AI API |
+| `db.py` | Database tables: paper, cluster, gap, literature count cache |
+| `api/main.py` | FastAPI backend. Serves the built frontend too |
+| `frontend/` | React + Plotly app |
+| `tests/` | Gap geometry and validation tests |
