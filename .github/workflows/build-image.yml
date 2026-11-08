@@ -1,4 +1,5 @@
-# Builds the Docker image (see Dockerfile) on every push to main, publishes it to
+# On every push to main: runs the tests and lint, then builds the Docker image
+# (see Dockerfile), publishes it to
 # GitHub's container registry (ghcr.io/cchan083/whack-2026), then deploys it to
 # Azure Container Apps. Azure for Students can't build images itself.
 #
@@ -19,6 +20,7 @@ name: Build and deploy to Azure
 on:
   push:
     branches: [main]
+  pull_request: # tests only: build and deploy are skipped for pull requests
   workflow_dispatch: # also allows a manual run from the Actions tab
 
 permissions:
@@ -31,7 +33,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Runs first: a failing test or lint error stops the build and deploy.
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # db.py needs a URL at import, but the tests never connect to it.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt pytest==8.4.2
+      - run: pytest -q tests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+
   build:
+    needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
