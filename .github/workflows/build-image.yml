@@ -1,11 +1,20 @@
-# Builds the Docker image (see Dockerfile) on every push to main and publishes it to
-# GitHub's container registry:  ghcr.io/cchan083/whack-2026:latest
-# Azure Container Apps runs that image; Azure for Students can't build images itself.
+# Builds the Docker image (see Dockerfile) on every push to main, publishes it to
+# GitHub's container registry (ghcr.io/cchan083/whack-2026), then deploys it to
+# Azure Container Apps. Azure for Students can't build images itself.
 #
-# One-time setup after the first run: GitHub -> your profile -> Packages -> whack-2026
-#   -> Package settings -> Change visibility -> Public  (so Azure can pull it without a password).
+# One-time setup:
+#   1. GitHub -> your profile -> Packages -> whack-2026 -> Package settings
+#      -> Change visibility -> Public  (so Azure can pull it without a password).
+#   2. In Azure Cloud Shell, create a deploy login limited to the resource group:
+#        az ad sp create-for-rbac --name gap-finder-deploy --role contributor \
+#          --scopes $(az group show -n gap-finder-rg --query id -o tsv) --json-auth
+#   3. GitHub -> Settings -> Secrets and variables -> Actions:
+#        Secret    AZURE_CREDENTIALS     = the whole JSON printed by step 2
+#        Variable  AZURE_RESOURCE_GROUP  = gap-finder-rg
+#        Variable  AZURE_CONTAINER_APP   = gap-finder
+# Until AZURE_CONTAINER_APP is set, only the build runs (the deploy is skipped).
 # The image holds no secrets: .dockerignore leaves out .env.
-name: Build Docker image
+name: Build and deploy to Azure
 
 on:
   push:
@@ -15,6 +24,11 @@ on:
 permissions:
   contents: read
   packages: write # publish to ghcr.io
+
+# One deploy at a time; a newer push replaces a waiting one.
+concurrency:
+  group: azure-deploy
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -36,3 +50,28 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    if: vars.AZURE_CONTAINER_APP != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Point the container app at the new image
+        # The commit tag (not "latest") makes Azure start a new revision every time.
+        run: |
+          az containerapp update \
+            --name "${{ vars.AZURE_CONTAINER_APP }}" \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --image "ghcr.io/${{ github.repository }}:${{ github.sha }}"
+      - name: Check the new version answers
+        run: |
+          host=$(az containerapp show -n "${{ vars.AZURE_CONTAINER_APP }}" -g "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          for i in $(seq 1 30); do
+            curl -fsS "https://$host/api/health" && exit 0
+            sleep 10
+          done
+          echo "The app didn't answer /api/health within 5 minutes" && exit 1
